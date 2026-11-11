@@ -1,0 +1,37 @@
+{
+  "migIndex": 1,
+  "data": [
+    {
+      "path": "src/assets/fonts/Inter-Bold.ttf",
+      "sha1": "b7ab5dc5e8d605338223de7a8ffe3ebea409d3bc"
+    },
+    {
+      "path": "src/assets/fonts/Inter-Medium.ttf",
+      "sha1": "78f01e4f13a7da5c283f4d0b5d36dc489eb5ab73"
+    },
+    {
+      "path": "src/assets/fonts/Inter-Regular.ttf",
+      "sha1": "78eae8a823f461192b4df2d67d7eaa818cf09b5a"
+    },
+    {
+      "path": "src/assets/fonts/Inter-SemiBold.ttf",
+      "sha1": "1048573ec372a0c4a60bd3d5b3ab3b82bc3973da"
+    },
+    {
+      "path": "src/assets/fonts/Manrope-Bold.ttf",
+      "sha1": "5c679ac44bea86c0771e588f3c2a55cb1f9911ff"
+    },
+    {
+      "path": "src/assets/fonts/Manrope-ExtraBold.ttf",
+      "sha1": "11a16f805106bab08570af865223064a141ea510"
+    },
+    {
+      "path": "src/assets/fonts/Manrope-Medium.ttf",
+      "sha1": "d91ca3a1ca0edcbfb2d7c7d30b9ec80f895f0dcd"
+    },
+    {
+      "path": "src/assets/fonts/Manrope-SemiBold.ttf",
+      "sha1": "a253028fc669444469e9782aceb9e3020814e4ea"
+    }
+  ]
+}
