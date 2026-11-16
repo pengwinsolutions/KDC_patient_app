@@ -33,6 +33,11 @@ import { useProfile } from '../store/profile'
 import { useCall } from '../store/call'
 import { showToast } from '../store/toast'
 import { finishConsultation, submitConsultationFeedback } from '../flows/consultation'
+import { LIVE } from '../services/config'
+import { errorMessage } from '../services/errors'
+import { joinSession, leaveSession } from '../services/live/consultations'
+import { useConsultationSession, usePrescriptionDoc } from '../hooks/useCare'
+import { Banner } from '../components/ui/Feedback'
 import { useElapsed } from '../hooks/useElapsed'
 import { formatDuration, formatTimer } from '../domain/schedule'
 
@@ -58,7 +63,101 @@ async function endAndComplete(nav: ReturnType<typeof useNav>) {
 
 /* ================================================= 22 — Waiting room ====== */
 
+/**
+ * Live: the patient waits here for the doctor. Joining marks them present on the server;
+ * the session is polled. There's no video or audio in the app yet (the media provider,
+ * decision D5, isn't chosen), so the room says so instead of showing a call.
+ */
+function LiveWaitingRoom() {
+  const nav = useNav()
+  const appointmentId: string | undefined = nav.params.id
+  const appointment = useAppointments((s) => s.items.find((a) => a.id === appointmentId))
+  const d = getDoctor(appointment?.doctorId ?? '')
+  const session = useConsultationSession(appointmentId)
+  const [notice, setNotice] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    if (!appointmentId) return
+    useCall.getState().beginWaiting(appointmentId)
+    joinSession(appointmentId).then(
+      (r) => {
+        useCall.getState().enterCall()
+        setNotice(r.mediaUnavailableReason)
+      },
+      (e) => setNotice(errorMessage(e, 'We could not open the waiting room. Please try again.')),
+    )
+    return () => {
+      void leaveSession(appointmentId).catch(() => undefined)
+    }
+  }, [appointmentId])
+  const s = session.data
+  const ended = s?.state === 'ended' || s?.appointmentStatus === 'completed'
+  const status = !s
+    ? 'Connecting…'
+    : ended
+      ? 'The consultation has ended'
+      : s.state === 'live'
+        ? 'Your consultation is in progress'
+        : s.doctorJoined
+          ? 'Doctor has joined'
+          : 'Waiting for the doctor to join'
+  const finish = async () => {
+    await finishConsultation()
+    nav.navigate('consult-complete', { replace: true })
+  }
+  return (
+    <Screen background="bg-canvas" padBottom={false}>
+      <ScreenHeader title="Waiting room" />
+      <Div className="flex-1 gap-4 px-5 pb-[130px] pt-4">
+        <Card elevation="tile">
+          <Div className="flex-row items-center gap-3.5">
+            <Avatar src={d.photo} name={d.name} size={54} radius={17} />
+            <Div className="min-w-0 flex-1">
+              <Div className="flex-row items-center gap-1">
+                <P className="truncate text-title-sm text-ink-900">{d.name}</P>
+                <VerifiedMark size={14} />
+              </Div>
+              <P className="truncate text-body-sm text-ink-500">{d.specialty}</P>
+              <P className={`mt-0.5 text-caption font-semibold ${s?.doctorJoined || s?.state === 'live' ? 'text-vital-700' : 'text-ink-400'}`}>{status}</P>
+            </Div>
+            <Div className="shrink-0 text-right">
+              <P className="text-caption text-ink-400">Scheduled</P>
+              <P className="text-title-sm tabular-nums text-ink-900">{appointment?.time ?? ''}</P>
+            </Div>
+          </Div>
+        </Card>
+
+        {notice && (
+          <Banner tone="caution" icon={<ShieldCheck className="h-[16px] w-[16px]" strokeWidth={2.2} />} title="About this consultation" body={notice} />
+        )}
+        <Banner
+          tone="brand"
+          icon={<Video className="h-[16px] w-[16px]" strokeWidth={2.2} />}
+          title="No in-app video or audio yet"
+          body="Calls inside KDC+ aren't available yet. Keep this screen open: it shows when the doctor starts and ends your consultation."
+        />
+      </Div>
+
+      <StickyBar>
+        {ended ? (
+          <Button onClick={finish} variant="success" icon={<Check className="h-[18px] w-[18px]" strokeWidth={2.4} />}>
+            Continue
+          </Button>
+        ) : (
+          <Button variant="tertiary" onClick={nav.back}>
+            Leave waiting room
+          </Button>
+        )}
+      </StickyBar>
+    </Screen>
+  )
+}
+
 export function WaitingRoomScreen() {
+  if (LIVE) return <LiveWaitingRoom />
+  return <DemoWaitingRoom />
+}
+
+function DemoWaitingRoom() {
   const nav = useNav()
   const appointmentId: string | undefined = nav.params.id
   const appointment = useAppointments((s) => s.items.find((a) => a.id === appointmentId))
@@ -383,8 +482,15 @@ const FEEDBACK_TAGS = ['Explained clearly', 'On time', 'Listened well', 'Would r
 export function ConsultCompleteScreen() {
   const nav = useNav()
   const d = useConsultDoctor()
-  const prescription = useCatalog((s) => s.prescription)
-  const duration = useCall((s) => s.lastDurationSeconds)
+  const appointment = useActiveAppointment()
+  const demoPrescription = useCatalog((s) => s.prescription)
+  /* Live: the prescription issued in this consultation, and the time the server recorded. */
+  const issued = usePrescriptionDoc(LIVE ? appointment?.prescriptionCode : undefined)
+  const prescription = LIVE ? issued : demoPrescription
+  const liveSession = useConsultationSession(LIVE && appointment?.status !== 'completed' ? appointment?.id : undefined)
+  const demoDuration = useCall((s) => s.lastDurationSeconds)
+  const duration = LIVE ? liveSession.data?.elapsedSeconds ?? null : demoDuration
+  const canRate = !LIVE || Boolean(appointment?.canGiveFeedback)
   const [rating, setRating] = React.useState(5)
   const [tags, setTags] = React.useState(FEEDBACK_TAGS.slice(0, 2))
   const [note, setNote] = React.useState('')
@@ -400,7 +506,9 @@ export function ConsultCompleteScreen() {
           <P className="mt-5 text-center font-display text-[25px] font-extrabold leading-[30px] tracking-[-0.5px] text-ink-900">
             Consultation completed
           </P>
-          <P className="mt-2 text-body text-ink-500">Duration {duration !== null ? formatDuration(duration) : '14 min 06 sec'}</P>
+          {(!LIVE || duration !== null) && (
+            <P className="mt-2 text-body text-ink-500">Duration {duration !== null ? formatDuration(duration) : '14 min 06 sec'}</P>
+          )}
         </Div>
 
         <Card elevation="tile" className="mt-6">
@@ -412,20 +520,33 @@ export function ConsultCompleteScreen() {
             </Div>
             <StatusBadge tone="success">Completed</StatusBadge>
           </Div>
-          <Divider className="my-3.5" />
-          <Div className="flex-row items-center gap-3">
-            <Span className="flex-col h-[36px] w-[36px] shrink-0 items-center justify-center rounded-tile bg-brand-50">
-              <FileText className="h-[17px] w-[17px] text-brand-600" strokeWidth={2.1} />
-            </Span>
-            <Div className="min-w-0 flex-1">
-              <P className="text-body-lg font-semibold text-ink-900">Prescription issued</P>
-              <P className="truncate text-caption text-ink-400">{prescription.medicines.length} medicines · follow-up in 4 weeks</P>
-            </Div>
-          </Div>
+          {prescription ? (
+            <>
+              <Divider className="my-3.5" />
+              <Div className="flex-row items-center gap-3">
+                <Span className="flex-col h-[36px] w-[36px] shrink-0 items-center justify-center rounded-tile bg-brand-50">
+                  <FileText className="h-[17px] w-[17px] text-brand-600" strokeWidth={2.1} />
+                </Span>
+                <Div className="min-w-0 flex-1">
+                  <P className="text-body-lg font-semibold text-ink-900">Prescription issued</P>
+                  <P className="truncate text-caption text-ink-400">
+                    {LIVE
+                      ? [`${prescription.medicines.length} medicines`, prescription.followUp].filter(Boolean).join(' · ')
+                      : `${prescription.medicines.length} medicines · follow-up in 4 weeks`}
+                  </P>
+                </Div>
+              </Div>
+            </>
+          ) : LIVE ? (
+            <>
+              <Divider className="my-3.5" />
+              <P className="text-body-sm text-ink-500">Your prescription appears here as soon as the doctor issues it.</P>
+            </>
+          ) : null}
         </Card>
 
         {/* Rating */}
-        <Div className="mt-7 text-center">
+        {canRate && <Div className="mt-7 text-center">
           <P className="text-title-md text-ink-900">How was your consultation?</P>
           <P className="mt-1.5 text-body text-ink-500">Your feedback stays anonymous to the doctor.</P>
           <Div className="mt-5">
@@ -447,26 +568,33 @@ export function ConsultCompleteScreen() {
           <Div className="mt-4">
             <TextArea placeholder="Add a note about your experience (optional)" value={note} onChangeText={setNote} />
           </Div>
-        </Div>
+        </Div>}
       </Div>
 
       <StickyBar>
         <Div className="gap-2.5">
-          <Button
-            onClick={() => nav.navigate('prescription')}
-            icon={<Pill className="h-[17px] w-[17px]" strokeWidth={2.2} />}
-          >
-            View Prescription
-          </Button>
-          <Button
-            variant="tertiary"
-            onClick={() => {
-              submitConsultationFeedback({ rating, tags, note })
-              nav.resetTo('home', 'home')
-            }}
-          >
-            Submit Feedback
-          </Button>
+          {(!LIVE || prescription) && (
+            <Button
+              onClick={() => nav.navigate('prescription', LIVE ? { params: { rxId: appointment?.prescriptionCode } } : undefined)}
+              icon={<Pill className="h-[17px] w-[17px]" strokeWidth={2.2} />}
+            >
+              View Prescription
+            </Button>
+          )}
+          {canRate ? (
+            <Button
+              variant="tertiary"
+              onClick={async () => {
+                if (await submitConsultationFeedback({ rating, tags, note })) nav.resetTo('home', 'home')
+              }}
+            >
+              Submit Feedback
+            </Button>
+          ) : (
+            <Button variant="tertiary" onClick={() => nav.resetTo('home', 'home')}>
+              Back to home
+            </Button>
+          )}
         </Div>
       </StickyBar>
     </Screen>

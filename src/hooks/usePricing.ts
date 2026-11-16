@@ -7,8 +7,9 @@ import { useMembership } from '../store/membership'
 export function usePricing() {
   const status = useMembership((s) => s.status)
   const planId = useMembership((s) => s.planId)
+  const rates = useMembership((s) => s.rates)
   return useMemo(() => {
-    const membership = { status, planId }
+    const membership = { status, planId, rates }
     const rate = (area: BenefitArea) => rateFor(membership, area)
     return {
       active: status === 'active',
@@ -17,5 +18,5 @@ export function usePricing() {
       memberSaving: (amount: number, area: BenefitArea) => memberSaving(amount, rate(area)),
       bill: (base: number, area: BenefitArea, platformFee = 0) => buildBill(base, rate(area), platformFee),
     }
-  }, [status, planId])
+  }, [status, planId, rates])
 }

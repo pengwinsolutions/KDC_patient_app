@@ -1,97 +1,93 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# KDC+ Patient
 
-# Getting Started
+The patient app for KDC+:
+- **Care:** finding doctors, booking consultations, appointments and the waiting room, prescriptions.
+- **Shopping:** medicines with prescription upload, lab tests with home collection, lab reports.
+- **Account:** family members and medical records, payments, KDC+ Plus membership, notifications and support.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+It's a bare React Native CLI app (no Expo) for Android and iOS, ported from the KDC+ blueprint.
 
-## Step 1: Start Metro
+## Run
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
-
-To start the Metro dev server, run the following command from the root of your React Native project:
-
-```sh
-# Using npm
-npm start
-
-# OR using Yarn
-yarn start
+```bash
+npm install
+cd ios && pod install && cd ..   # iOS only
+npm start                        # Metro
+npm run android                  # or: npm run ios
 ```
 
-## Step 2: Build and run your app
+## Live or demo
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+`src/services/config.ts` decides, per build:
 
-### Android
+- **Live** (`useMock: false`, the default): set `baseUrl` to the KDC+ backend's API root, e.g. `https://api.kdcplus.in/api/v1`. Patients sign in with their mobile number and a 6-digit SMS code. The first sign-in creates the account, and the patient then completes their profile (consent is required).
+- **Demo** (`useMock: true`): the original prototype, with seeded data on its fixed date (5 Oct 2025) and a prefilled sign-in. Never use it with real patients.
 
-```sh
-# Using npm
-npm run android
+## Where things live
 
-# OR using Yarn
-yarn android
-```
+| Path | What |
+| --- | --- |
+| `src/services/config.ts` | Live or demo, and the backend address |
+| `src/services/index.ts` | The services switch: `services/live/*` (backend) or the mock services |
+| `src/services/live/http.ts` | Calls the backend and throws `ServiceError` (`services/errors.ts`) with the server's message and field. Refreshes an expired access token once (one refresh at a time) and ends the session once when it can't continue, never on an outage. Uploads with progress |
+| `src/services/live/sync*.ts` | Loads the stores from the backend, after sign-in and on every launch, and clears them on sign-out. The areas: care (doctors, appointments, prescriptions), commerce (catalogue, orders, reports), account (family, medical, addresses, records, notifications, settings), money (membership, payments) |
+| `src/services/live/holds.ts`, `flows-*.ts` | Checkout: the server creates and prices the purchase, then it's paid through Razorpay Checkout (`flows-payment.ts`, `checkout.ts`) |
+| `src/store/secure.ts` | The refresh token in the iOS Keychain / Android Keystore (`react-native-keychain`) |
+| `src/store/storage.ts` | Live: only the session store persists, holding nothing but "intro seen". Everything about the patient stays in memory |
 
-### iOS
+## Live mode
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+How live builds behave, following the backend's rules:
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+- **Session:**
+  - The refresh token lives in the Keychain / Keystore (after first unlock, this device only). The access token is never written to disk.
+  - Launching restores the session and reloads everything; an outage shows "Try again" and never signs out.
+  - *Log out* ends the session on the server and clears everything from the phone.
+  - *Delete account* confirms with an SMS code, then erases the account on the server.
+- **Doctors and booking:**
+  - Doctors, specialties, reviews and saved doctors come from the directory.
+  - Dates and slots are the doctor's real availability, and the server refuses a slot someone has just taken.
+  - Cancelling shows the server's quote (free, or a late fee and refund).
+- **Consultations:** the waiting room joins and follows the session on the server. **There's no video or audio yet:** the provider (decision D5) isn't chosen, and the screen says so.
+- **Payments:**
+  - The server creates the purchase (appointment, order, lab booking or membership), which holds the slot or stock and prices it. The patient pays that total in Razorpay Checkout (UPI, cards, netbanking, wallets), and the server verifies it.
+  - There's no card form in the app. Medicines can be paid on delivery, and lab tests at collection.
+  - A closed Checkout keeps the purchase on hold, so retrying pays the same one.
+- **Pharmacy and lab tests:**
+  - The catalogue, stock and prices come from the server.
+  - Prescription medicines need a KDC+ prescription or an uploaded photo; the server says what isn't covered.
+  - Orders and bookings show the server's stages.
+  - Lab reports show their results; their files can't be opened yet.
+- **Membership:** plans, member rates and savings come from the server, so displayed member prices match the bills. Auto-renew is only a saved preference, because recurring billing isn't built.
+- **Account:** family, medical info, addresses, the health timeline, notifications, settings (saved on the server) and support tickets.
+- **Not yet:**
+  - push notifications (needs the KDC+ Firebase files)
+  - profile, family and doctor photos (need authenticated image loading)
+  - opening report files, invoices and documents (needs a file viewer)
+  - PDF prescription upload (no document picker installed)
+  - the delivery and home-collection fees before ordering (not in the public settings)
+  - reading or replying to a support ticket in the app
+  - distance-based doctor search (the app doesn't ask for location)
 
-```sh
-bundle install
-```
+## Native setup
 
-Then, and every time you update your native dependencies, run:
+- **Razorpay:** `react-native-razorpay` 3.0.0 is set up for both platforms.
+  - iOS: its pod, plus `LSApplicationQueriesSchemes` (tez, phonepe, paytmmp) in `Info.plist` so UPI apps open.
+  - Android: its ProGuard rules are in `android/app/proguard-rules.pro`.
+- **Keychain:** `react-native-keychain` 11.0.0.
 
-```sh
-bundle exec pod install
-```
+## Tests
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+`npm test` runs in demo mode: the stores, flows, payments, search, validation, and a render of every screen.
 
-```sh
-# Using npm
-npm run ios
+The live contract tests in `__tests__/live/` run the app's own stores and flows on a running backend:
 
-# OR using Yarn
-yarn ios
-```
+| Suite | What it covers |
+| --- | --- |
+| `core` | SMS sign-in, onboarding, session restore, logout |
+| `care` and `care-screens` | Search, doctor detail and slots, booking, reschedule, cancel, the waiting room, prescriptions, feedback; screens render blank, then the server's data |
+| `commerce` | Medicines and tests, labs and slots, cash-on-delivery and prescription orders, lab bookings, stages, reports |
+| `account` | Family, medical, addresses, settings, timeline, notifications, support, account deletion |
+| `money` | Membership through Razorpay Checkout (a cancelled payment and its retry), history and summary, UPI ids, a consultation and pharmacy orders through checkout, ending the membership |
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
-
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
-
-## Step 3: Modify your app
-
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+They're skipped unless `PATIENT_LIVE_URL` and `PATIENT_DATA` are set; see `test-support/live.ts`. The data file comes from the backend test kit.

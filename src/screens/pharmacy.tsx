@@ -40,13 +40,14 @@ import { Banner, Skeleton, Timeline, Toast, type TimelineStep } from '../compone
 import { MedicineCard, AddressCard, PaymentMethodRow } from '../components/cards/index'
 import { AddressFormSheet } from '../components/forms/Sheets'
 import { rupee } from '../mock-data/mock'
+import { SCENE } from '../mock-data/media'
 import { MemberDiscountLine, PlusTag, PlusUpsell } from '../components/ui/Membership'
 import { useNav } from '../navigation/navigation'
 import type { CartLine, Medicine } from '../types'
 import { getDoctor, getMedicine, getMedicineDetail, reorderLines, useCatalog } from '../store/catalog'
 import { useCart } from '../store/cart'
 import { formatAddress, useAddresses } from '../store/addresses'
-import { CASH_ON_DELIVERY, usePayments } from '../store/payments'
+import { CASH_ON_DELIVERY, PAY_ONLINE, usePayments } from '../store/payments'
 import { pharmacyOrderById, useOrders } from '../store/orders'
 import { completedUploads, useUploads } from '../store/uploads'
 import { showToast } from '../store/toast'
@@ -55,7 +56,10 @@ import type { PickResult } from '../services/documents'
 import { orderPrescription } from '../flows/prescriptions'
 import { useCheckout } from '../flows/payment'
 import { usePricing } from '../hooks/usePricing'
-import { useMedicineSearch } from '../hooks/queries'
+import { useMedicineDetail, useMedicineSearch } from '../hooks/queries'
+import { LIVE } from '../services/config'
+import { loadPharmacyOrder } from '../services/live/pharmacy'
+import '../services/live/sync-commerce'
 import { useNow } from '../hooks/useNow'
 import { cartSubtotal, rxCoverage, type MedicineFilter } from '../domain/catalogue'
 import { currentStage, PHARMACY_STAGES, stageState } from '../domain/orderTracking'
@@ -91,6 +95,9 @@ export function PharmacyHomeScreen() {
   const { memberPrice } = usePricing()
   const actions = useMedicineCardActions()
   const lines = reorderLines()
+  const rxDoctor = getDoctor(prescription.doctorId)
+  /* Live: only when the latest KDC+ prescription has medicines in the catalogue. */
+  const showReorder = !LIVE || lines.length > 0
   const reorderTotal = memberPrice(useSubtotal(lines), 'pharmacy')
   const addAll = () => {
     orderPrescription(prescription, getDoctor(prescription.doctorId).name)
@@ -153,8 +160,12 @@ export function PharmacyHomeScreen() {
         </Div>
 
         {/* Reorder */}
-        <Div className="pt-6">
-          <SectionHeader title="Reorder from your prescription" subtitle="Dr. Arjun Mehta · 22 Sep" className="pb-3" />
+        {showReorder && <Div className="pt-6">
+          <SectionHeader
+            title="Reorder from your prescription"
+            subtitle={LIVE ? [rxDoctor.name, prescription.date].filter(Boolean).join(' · ') : 'Dr. Arjun Mehta · 22 Sep'}
+            className="pb-3"
+          />
           <Div className="px-5">
             <Card elevation="tile" padded={false} className="overflow-hidden">
               <Div className="gap-2.5 p-4">
@@ -178,12 +189,12 @@ export function PharmacyHomeScreen() {
                 onPress={addAll}
                 className="flex-row w-full items-center justify-between border-t border-ink-100 bg-brand-50/60 px-4 py-3"
               >
-                <Span className="text-body-sm font-bold text-brand-700">Add all 3 to cart</Span>
+                <Span className="text-body-sm font-bold text-brand-700">Add all {LIVE ? lines.length : 3} to cart</Span>
                 <Span className="text-body-sm font-bold text-brand-700">{rupee(reorderTotal)}</Span>
               </Btn>
             </Card>
           </Div>
-        </Div>
+        </Div>}
 
         {/* Categories */}
         <Div className="pt-6">
@@ -216,7 +227,7 @@ export function PharmacyHomeScreen() {
         <Div className="pt-6">
           <SectionHeader title="Frequently bought" action="See all" onAction={() => nav.navigate('medicine-search', { params: { q: '' } })} className="pb-3" />
           <Div className="gap-2.5 px-5">
-            {medicines.slice(3, 6).map((m) => (
+            {(LIVE ? medicines.slice(0, 4) : medicines.slice(3, 6)).map((m) => (
               <MedicineCard key={m.id} medicine={m} {...actions(m)} />
             ))}
           </Div>
@@ -236,7 +247,7 @@ export function MedicineSearchScreen() {
   const nav = useNav()
   const actions = useMedicineCardActions()
   const category: string | undefined = nav.params.category
-  const [text, setText] = React.useState<string>(nav.params.q ?? 'tab')
+  const [text, setText] = React.useState<string>(nav.params.q ?? (LIVE ? '' : 'tab'))
   const [filter, setFilter] = React.useState<MedicineFilter>('All')
   const result = useMedicineSearch({ text, filter, category })
   const found = result.data ?? []
@@ -280,11 +291,15 @@ export function MedicineSearchScreen() {
 
 export function MedicineDetailScreen() {
   const nav = useNav()
-  const m = getMedicine(nav.params.id ?? 'm1')
+  const id: string = nav.params.id ?? (LIVE ? '' : 'm1')
+  /* Live: the page's price, stock and details come from the server; this re-renders when they arrive. */
+  useMedicineDetail(id)
+  useCatalog((s) => s.medicines)
+  const m = getMedicine(id)
   const info = getMedicineDetail(m)
   const { memberPrice } = usePricing()
   const [qty, setQty] = React.useState(1)
-  const off = Math.round(((m.mrp - m.price) / m.mrp) * 100)
+  const off = m.mrp ? Math.round(((m.mrp - m.price) / m.mrp) * 100) : 0
 
   return (
     <Screen background="bg-canvas" padBottom={false}>
@@ -323,7 +338,9 @@ export function MedicineDetailScreen() {
 
           <Div className="mt-3 flex-row items-center gap-2 rounded-tile bg-vital-50 px-3.5 py-2.5">
             <Truck className="h-[15px] w-[15px] shrink-0 text-vital-600" strokeWidth={2.2} />
-            <P className="text-body-sm font-semibold text-vital-700">Delivery by today, 7:30 PM to 500034</P>
+            <P className="text-body-sm font-semibold text-vital-700">
+              {LIVE ? (m.inStock ? 'In stock · choose a delivery slot at checkout' : 'Out of stock right now') : 'Delivery by today, 7:30 PM to 500034'}
+            </P>
           </Div>
         </Div>
 
@@ -411,8 +428,11 @@ export function UploadScreen() {
   const sources = [
     { Icon: Camera, title: 'Take a photo', body: 'Use the camera to capture the prescription', pick: services.documents.pickFromCamera },
     { Icon: ImageIcon, title: 'Choose from gallery', body: 'Select an existing image from your phone', pick: services.documents.pickFromGallery },
-    { Icon: FileText, title: 'Upload a PDF', body: 'Attach a PDF prescription, up to 10 MB', pick: services.documents.pickPdf },
+    /* Live: there's no document picker yet, so a PDF can't be chosen; photos of the prescription work. */
+    ...(LIVE ? [] : [{ Icon: FileText, title: 'Upload a PDF', body: 'Attach a PDF prescription, up to 10 MB', pick: services.documents.pickPdf }]),
   ]
+  const latestRx = history[0]
+  const latestRxDoctor = getDoctor(latestRx?.doctorId ?? '')
 
   const finish = () => {
     const needsPrescription = !rxCoverage(lines, medicines, attached, prescription.medicines).covered
@@ -450,22 +470,26 @@ export function UploadScreen() {
           ))}
         </Div>
 
-        <Div className="mt-4">
+        {(!LIVE || latestRx) && <Div className="mt-4">
           <SectionHeader title="Or use a KDC+ prescription" className="!px-0 pb-2.5" />
           <Btn
-            onPress={() => nav.navigate('prescription', { params: { rxId: history[0].rxId } })}
+            onPress={() => nav.navigate('prescription', { params: { rxId: latestRx.rxId } })}
             className="tap flex-row w-full items-center gap-3.5 rounded-card bg-white p-4 text-left shadow-tile"
           >
             <Span className="flex-col h-[44px] w-[44px] shrink-0 items-center justify-center rounded-tile bg-vital-50">
               <FileText className="h-[20px] w-[20px] text-vital-600" strokeWidth={2} />
             </Span>
             <Div className="min-w-0 flex-1">
-              <P className="text-title-sm text-ink-900">Dr. Arjun Mehta — 22 Sep</P>
-              <P className="mt-0.5 truncate text-body-sm text-ink-500">Cardiologist · 3 medicines</P>
+              <P className="text-title-sm text-ink-900">
+                {LIVE ? `${latestRxDoctor.name} — ${latestRx.date}` : 'Dr. Arjun Mehta — 22 Sep'}
+              </P>
+              <P className="mt-0.5 truncate text-body-sm text-ink-500">
+                {LIVE ? `${latestRx.specialty} · ${latestRx.items} ${latestRx.items === 1 ? 'medicine' : 'medicines'}` : 'Cardiologist · 3 medicines'}
+              </P>
             </Div>
-            <StatusBadge tone="success">Active</StatusBadge>
+            {(!LIVE || latestRx.status === 'active') && <StatusBadge tone="success">Active</StatusBadge>}
           </Btn>
-        </Div>
+        </Div>}
 
         {/* Uploaded preview */}
         {uploads.length > 0 && (
@@ -594,7 +618,8 @@ export function CartScreen() {
           Add more medicines
         </Btn>
 
-        <Card elevation="tile">
+        {/* Live: no coupons exist on the server; only the member rate is shown. */}
+        {(!LIVE || pricing.active) && <Card elevation="tile">
           <Div className="flex-row items-center gap-3">
             <Tag className="h-[17px] w-[17px] shrink-0 text-vital-600" strokeWidth={2.2} />
             <Div className="min-w-0 flex-1">
@@ -608,9 +633,9 @@ export function CartScreen() {
                 <P className="text-caption text-vital-700">You saved {rupee(bill.discount)}</P>
               )}
             </Div>
-            <Span className="text-body-sm font-semibold text-brand-600">Change</Span>
+            {!LIVE && <Span className="text-body-sm font-semibold text-brand-600">Change</Span>}
           </Div>
-        </Card>
+        </Card>}
 
         {/* The offer belongs where a non-member is about to pay full price. */}
         {!pricing.active && (
@@ -621,15 +646,25 @@ export function CartScreen() {
           <P className="mb-1.5 text-title-sm text-ink-900">Bill summary</P>
           <KeyValue label={`Item total (${lines.length})`} value={rupee(subtotal)} />
           <MemberDiscountLine amount={subtotal} area="pharmacy" />
-          <KeyValue label="Delivery fee" value="FREE" tone="success" />
+          {LIVE ? (
+            <KeyValue label="Delivery fee" value="At checkout" />
+          ) : (
+            <KeyValue label="Delivery fee" value="FREE" tone="success" />
+          )}
           <Divider className="my-2.5" />
-          <KeyValue label="Total payable" value={rupee(total)} strong />
+          <KeyValue label={LIVE ? 'Total before delivery' : 'Total payable'} value={rupee(total)} strong />
         </Card>
 
         <Div className="flex-row items-center gap-3 rounded-card bg-white p-3.5 shadow-tile">
           <Truck className="h-[17px] w-[17px] shrink-0 text-brand-600" strokeWidth={2.2} />
           <P className="min-w-0 flex-1 text-body-sm text-ink-600">
-            Delivery by <Span className="font-bold text-ink-900">today, 7:30 PM</Span>
+            {LIVE ? (
+              'Choose a delivery slot at checkout'
+            ) : (
+              <>
+                Delivery by <Span className="font-bold text-ink-900">today, 7:30 PM</Span>
+              </>
+            )}
           </P>
         </Div>
       </Div>
@@ -741,7 +776,8 @@ export function CheckoutScreen() {
         <Div>
           <SectionHeader title="Payment method" className="!px-0 pb-2.5" />
           <Div className="gap-2">
-            {methods.map((p) => (
+            {/* Live: online payment goes through Razorpay Checkout, which offers the saved and other methods itself. */}
+            {(LIVE ? [PAY_ONLINE] : methods).map((p) => (
               <PaymentMethodRow key={p.id} pm={p} selected={p.id === selectedMethod} onClick={() => selectMethod(p.id)} />
             ))}
             <Btn
@@ -772,9 +808,13 @@ export function CheckoutScreen() {
           <P className="mb-1.5 text-title-sm text-ink-900">Order summary</P>
           <KeyValue label={`Item total (${lines.length})`} value={rupee(subtotal)} />
           <MemberDiscountLine amount={subtotal} area="pharmacy" />
-          <KeyValue label="Delivery fee" value="FREE" tone="success" />
+          {LIVE ? (
+            <KeyValue label="Delivery fee" value="Added if below the free-delivery amount" />
+          ) : (
+            <KeyValue label="Delivery fee" value="FREE" tone="success" />
+          )}
           <Divider className="my-2.5" />
-          <KeyValue label="Total payable" value={rupee(bill.total)} strong />
+          <KeyValue label={LIVE ? 'Total before delivery' : 'Total payable'} value={rupee(bill.total)} strong />
         </Card>
       </Div>
 
@@ -796,22 +836,35 @@ export function OrderTrackingScreen() {
   const [saved, setSaved] = React.useState(false)
   const orders = useOrders((s) => s.pharmacy)
   const now = useNow(NOW_REFRESH_MS)
-  const order = pharmacyOrderById(orders, nav.params.id)
+  const code: string | undefined = nav.params.id
+  React.useEffect(() => {
+    // Live: the server's stage and status history, reloaded while the screen is open.
+    if (!LIVE || !code) return
+    const reload = () => void loadPharmacyOrder(code).then((o) => useOrders.getState().upsertPharmacy(o)).catch(() => undefined)
+    reload()
+    const timer = setInterval(reload, 20_000)
+    return () => clearInterval(timer)
+  }, [code])
+  const order = pharmacyOrderById(orders, code)
   const stage = currentStage(order, now)
   const finished = stage >= 4
-  const riderInitials = order.rider.name.split(' ').map((p) => p[0]).join('').toUpperCase()
+  const riderInitials = order.rider.name.split(' ').filter(Boolean).map((p) => p[0]).join('').toUpperCase()
   const stageTime = (i: number) => order.stageTimes?.[i]
   const stateFor = (i: number) => stageState(i, stage, finished)
+  const paidNote = LIVE ? (order.payment === 'Cash on delivery' ? 'Cash on delivery' : order.paymentRequired ? 'Waiting for payment' : 'Payment received') : 'Payment received'
+  const rxNote = LIVE
+    ? order.rxRequired ? 'Checked by our registered pharmacist' : 'No prescription needed'
+    : 'Reviewed by Dr. Nandini R., Registered Pharmacist'
   const steps: TimelineStep[] = [
-    { title: PHARMACY_STAGES[0], time: stageTime(0), body: `Payment received · ${order.id}`, state: stateFor(0) },
-    { title: PHARMACY_STAGES[1], time: stageTime(1), body: 'Reviewed by Dr. Nandini R., Registered Pharmacist', state: stateFor(1) },
+    { title: PHARMACY_STAGES[0], time: stageTime(0), body: `${paidNote} · ${order.id}`, state: stateFor(0) },
+    { title: PHARMACY_STAGES[1], time: stageTime(1), body: rxNote, state: stateFor(1) },
     { title: PHARMACY_STAGES[2], time: stageTime(2), body: order.partner, state: stateFor(2) },
     {
       title: PHARMACY_STAGES[3],
       time: stageTime(3),
-      body: `${order.rider.name} is on the way with your order`,
+      body: order.rider.name ? `${order.rider.name} is on the way with your order` : 'A delivery partner brings your order',
       state: stateFor(3),
-      meta: stage === 3 && (
+      meta: stage === 3 && Boolean(order.rider.name) && (
         <Div className="flex-row items-center gap-2.5 rounded-tile bg-white p-2.5 shadow-tile">
           <Span className="flex-col h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-brand-50 text-body-sm font-bold text-brand-700">
             {riderInitials}
@@ -840,7 +893,7 @@ export function OrderTrackingScreen() {
               <Truck className="h-[20px] w-[20px] text-white" strokeWidth={2.1} />
             </Span>
             <Div className="min-w-0 flex-1">
-              <P className="text-title-sm text-white">{finished ? 'Delivered' : order.etaWhen}</P>
+              <P className="text-title-sm text-white">{order.cancelled ? order.statusLabel : finished ? 'Delivered' : order.etaWhen}</P>
               <P className="mt-0.5 text-body-sm text-white/65">{order.lines.length} items · {rupee(order.trackedTotal ?? order.amount)}</P>
             </Div>
           </Div>
@@ -876,24 +929,25 @@ export function OrderTrackingScreen() {
               {order.lines.map((l) => {
                 const m = getMedicine(l.medicineId)
                 return (
-                  <Div key={m.id} className="flex-row items-center gap-3">
-                    <Img src={m.photo} alt="" className="h-[36px] w-[36px] rounded-[10px] object-cover" />
+                  <Div key={l.medicineId} className="flex-row items-center gap-3">
+                    <Img src={m.photo || SCENE.blister} alt="" className="h-[36px] w-[36px] rounded-[10px] object-cover" />
                     <Div className="min-w-0 flex-1">
-                      <P className="truncate text-body-sm font-semibold text-ink-900">{m.name}</P>
+                      <P className="truncate text-body-sm font-semibold text-ink-900">{l.name ?? m.name}</P>
                       <P className="text-caption text-ink-400">Qty {l.qty}</P>
                     </Div>
-                    <Span className="text-body-sm font-bold text-ink-900">{rupee(m.price * l.qty)}</Span>
+                    <Span className="text-body-sm font-bold text-ink-900">{rupee((l.price ?? m.price) * l.qty)}</Span>
                   </Div>
                 )
               })}
             </Div>
           </Div>
-          <Btn
+          {/* Live: invoices are issued on the server; opening the PDF needs a file viewer the app doesn't have yet. */}
+          {!LIVE && <Btn
             onPress={() => setSaved(true)}
             className="tap flex-row w-full items-center justify-center gap-2 border-t border-ink-100 py-3 text-body-sm font-semibold text-brand-600"
           >
             Download invoice
-          </Btn>
+          </Btn>}
         </Card>
       </Div>
 

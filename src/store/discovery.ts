@@ -7,6 +7,8 @@ import {
   type DoctorQuery,
   type SortKey,
 } from '../domain/doctorSearch'
+import { LIVE } from '../services/config'
+import { showToast } from './toast'
 import { persistStorage } from './storage'
 
 export interface RecentSearch {
@@ -15,12 +17,17 @@ export interface RecentSearch {
   doctorId?: string
 }
 
-const SEED_RECENTS: RecentSearch[] = [
+const DEMO_RECENTS: RecentSearch[] = [
   { label: 'Cardiologist' },
   { label: 'Dr. Sanjay Iyer', doctorId: 'd5' },
   { label: 'Cardiologist in Kompally' },
   { label: 'Paediatrician near me' },
 ]
+
+/** Live: no seeded searches, and recent searches stay in memory (they can describe a condition). */
+const SEED_RECENTS: RecentSearch[] = LIVE ? [] : DEMO_RECENTS
+/* The demo's first list quotes the blueprint's catalogue; live lists always show real counts. */
+const SEED_PRISTINE = !LIVE
 
 interface DiscoveryState {
   recents: RecentSearch[]
@@ -49,10 +56,10 @@ export function sheetFiltersFor(state: Pick<DiscoveryState, 'pristine' | 'query'
 
 export const useDiscovery = create<DiscoveryState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       recents: SEED_RECENTS,
       savedDoctorIds: [],
-      pristine: true,
+      pristine: SEED_PRISTINE,
       query: initialQuery,
       setText: (text) => set((s) => ({ query: { ...s.query, text }, pristine: false })),
       applySearch: (text) =>
@@ -71,13 +78,22 @@ export const useDiscovery = create<DiscoveryState>()(
       showAll: () => set((s) => ({ pristine: false, query: { ...initialQuery, sort: s.query.sort } })),
       removeRecent: (label) => set((s) => ({ recents: s.recents.filter((r) => r.label !== label) })),
       clearRecents: () => set({ recents: [] }),
-      toggleSaved: (doctorId) =>
-        set((s) => ({
-          savedDoctorIds: s.savedDoctorIds.includes(doctorId)
-            ? s.savedDoctorIds.filter((id) => id !== doctorId)
-            : [...s.savedDoctorIds, doctorId],
-        })),
-      reset: () => set({ recents: SEED_RECENTS, savedDoctorIds: [], pristine: true, query: initialQuery }),
+      toggleSaved: (doctorId) => {
+        const before = get().savedDoctorIds
+        const saving = !before.includes(doctorId)
+        set({ savedDoctorIds: saving ? [...before, doctorId] : before.filter((id) => id !== doctorId) })
+        if (LIVE) {
+          const live = require('../services/live/doctors') as typeof import('../services/live/doctors')
+          live.setSaved(doctorId, saving).then(
+            (ids) => set({ savedDoctorIds: ids }),
+            () => {
+              set({ savedDoctorIds: before })
+              showToast('We could not update your saved doctors. Please try again.', 'critical')
+            },
+          )
+        }
+      },
+      reset: () => set({ recents: SEED_RECENTS, savedDoctorIds: [], pristine: SEED_PRISTINE, query: initialQuery }),
     }),
     {
       name: 'discovery',

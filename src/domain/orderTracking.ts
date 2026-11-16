@@ -3,7 +3,7 @@ import type { DiagnosticOrder, Order, PharmacyOrder } from '../types'
 export const PHARMACY_STAGES = ['Order confirmed', 'Prescription verified', 'Packed at pharmacy', 'Out for delivery', 'Delivered'] as const
 export const DIAGNOSTIC_STAGES = ['Booking confirmed', 'Technician assigned', 'Sample collected', 'Processing at lab', 'Report ready'] as const
 
-/** A mock order moves one stage every 45 seconds so tracking can be watched. */
+/** A mock order moves one stage every 45 seconds so tracking can be watched. Live orders carry the server's stage (`fixedStage`). */
 export const STAGE_INTERVAL_MS = 45_000
 
 /** Zero-based index of the stage the order is currently in. */
@@ -41,8 +41,22 @@ export interface OrderRow {
 
 export function pharmacyRow(order: PharmacyOrder, medicineName: (id: string) => string, now: number): OrderRow {
   const delivered = isDelivered(order, now)
-  const names = order.lines.map((l) => medicineName(l.medicineId).replace(' Tablet', '')).join(', ')
+  const names = order.lines.map((l) => (l.name ?? medicineName(l.medicineId)).replace(' Tablet', '')).join(', ')
   const count = order.lines.length
+  if (order.cancelled) {
+    return {
+      id: order.id,
+      kind: 'pharmacy',
+      title: `${count} ${count === 1 ? 'medicine' : 'medicines'}`,
+      sub: names,
+      when: order.placed,
+      amount: order.amount,
+      status: order.statusLabel ?? 'Cancelled',
+      tone: 'neutral',
+      live: false,
+      screen: 'order-tracking',
+    }
+  }
   return {
     id: order.id,
     kind: 'pharmacy',
@@ -50,7 +64,7 @@ export function pharmacyRow(order: PharmacyOrder, medicineName: (id: string) => 
     sub: names,
     when: order.etaWhen,
     amount: order.amount,
-    status: delivered ? 'Delivered' : PHARMACY_STAGES[currentStage(order, now)],
+    status: delivered ? 'Delivered' : order.statusLabel ?? PHARMACY_STAGES[currentStage(order, now)],
     tone: delivered ? 'success' : 'brand',
     live: !delivered,
     screen: 'order-tracking',
@@ -72,7 +86,7 @@ export function diagnosticRow(order: DiagnosticOrder, test: string, lab: string,
     sub: `${lab} · ${order.method === 'Home Collection' ? 'Home collection' : 'Lab visit'}`,
     when: reportDone ? order.reportedWhen! : `${order.date.replace(/ \d{4}$/, '')} · ${order.slotCompact}`,
     amount: order.amount,
-    status: cancelled ? 'Cancelled' : complete ? 'Report ready' : 'Confirmed',
+    status: cancelled ? 'Cancelled' : complete ? 'Report ready' : order.statusLabel ?? 'Confirmed',
     tone: cancelled ? 'neutral' : complete ? 'success' : 'brand',
     live,
     screen: complete ? 'lab-report' : 'diagnostic-tracking',

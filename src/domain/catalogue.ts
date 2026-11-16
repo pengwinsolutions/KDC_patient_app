@@ -1,5 +1,6 @@
 import type { CartLine, CartPrescription, Lab, LabTest, Medicine, PatientReport, PrescribedMedicine, PrescriptionSummary } from '../types'
 import { labTestPrice } from './pricing'
+import { MOCK_TODAY } from './schedule'
 
 const matches = (values: string[], text: string) => {
   const needle = text.trim().toLowerCase()
@@ -99,8 +100,19 @@ export function sortLabs(labs: Lab[], sort: LabSort): Lab[] {
   return sorted.sort((a, b) => b.slots - a.slots)
 }
 
-export const cheapestLabPrice = (test: LabTest, labs: Lab[]) =>
-  Math.min(...labs.map((l) => labTestPrice(test.price, l.price)))
+/**
+ * A lab's price for a test. Live: the lab's own price for it (GET /public/labs?tests=), or the
+ * test's listed price until the labs have loaded. Demo: proportional to the lab's reference rate.
+ */
+export function labPriceFor(test: LabTest, lab: Lab): number {
+  if (lab.testPrices) return lab.testPrices[test.id] ?? test.price
+  return labTestPrice(test.price, lab.price)
+}
+
+export function cheapestLabPrice(test: LabTest, labs: Lab[]): number {
+  const prices = labs.filter((l) => !l.testPrices || test.id in l.testPrices).map((l) => labPriceFor(test, l))
+  return prices.length ? Math.min(...prices) : test.price
+}
 
 export type ReportFilter = 'All' | 'Blood tests' | 'Imaging' | 'Needs attention' | 'This year'
 
@@ -110,7 +122,7 @@ export function searchReports(reports: PatientReport[], text: string, filter: Re
     if (filter === 'Blood tests') return r.kind === 'blood'
     if (filter === 'Imaging') return r.kind === 'imaging'
     if (filter === 'Needs attention') return r.flagged > 0
-    if (filter === 'This year') return r.month.endsWith('2025')
+    if (filter === 'This year') return r.month.endsWith(String(MOCK_TODAY.year))
     return true
   })
 }

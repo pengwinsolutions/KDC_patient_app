@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ConsultMode } from '../types'
-import { sameDate, type CalendarDate } from '../domain/schedule'
+import { MOCK_TODAY, sameDate, type CalendarDate } from '../domain/schedule'
+import { LIVE } from '../services/config'
 import { getDoctor } from './catalog'
 import { persistStorage } from './storage'
 
@@ -31,7 +32,7 @@ interface BookingState extends BookingDraft {
   reset: () => void
 }
 
-const seed: BookingDraft = {
+const DEMO_SEED: BookingDraft = {
   doctorId: 'd1',
   mode: 'video',
   clinicId: 'c1',
@@ -41,11 +42,17 @@ const seed: BookingDraft = {
   reschedulingId: null,
 }
 
+/** Live: nothing chosen yet. An empty patientId means the account holder. */
+const LIVE_SEED: BookingDraft = { doctorId: '', mode: 'video', clinicId: '', date: MOCK_TODAY, time: null, patientId: '', reschedulingId: null }
+
+const seed = LIVE ? LIVE_SEED : DEMO_SEED
+
 export const useBooking = create<BookingState>()(
   persist(
     (set) => ({
       ...seed,
-      selectDoctor: (doctorId) => set({ doctorId, reschedulingId: null }),
+      selectDoctor: (doctorId) =>
+        set((s) => (LIVE && s.doctorId !== doctorId ? { doctorId, reschedulingId: null, time: null, date: MOCK_TODAY } : { doctorId, reschedulingId: null })),
       setMode: (mode) => set({ mode }),
       setClinic: (clinicId) => set({ clinicId }),
       setDate: (date) => set((s) => (sameDate(s.date, date) ? s : { date, time: null })),

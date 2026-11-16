@@ -1,3 +1,5 @@
+import { LIVE } from '../services/config'
+
 /** Dates and slots for booking. `month` is zero-based, as in `Date`. */
 export interface CalendarDate {
   year: number
@@ -17,14 +19,51 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 
 export const MONTH_NAMES = MONTHS
 
-/** The prototype's "today": every seeded record is dated relative to it. */
-export const MOCK_TODAY: CalendarDate = { year: 2025, month: 9, day: 5 }
+/** Today in India (IST, UTC+5:30), whatever the phone's time zone. */
+export function istToday(now = Date.now()): CalendarDate {
+  const d = new Date(now + 5.5 * 3_600_000)
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth(), day: d.getUTCDate() }
+}
+
+/**
+ * "Today". Demo: the prototype's fixed date, which every seeded record is dated relative
+ * to. Live: the real date in India, read when the app starts.
+ */
+export const MOCK_TODAY: CalendarDate = LIVE ? istToday() : { year: 2025, month: 9, day: 5 }
 
 /** How far ahead a patient may book, counted in months from today. */
 export const BOOKING_MONTHS_AHEAD = 2
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const weekday = (d: CalendarDate) => new Date(d.year, d.month, d.day).getDay()
+
+/** "2026-11-16" → a CalendarDate. */
+export function fromIso(iso: string): CalendarDate {
+  const [year, month, day] = iso.slice(0, 10).split('-').map(Number)
+  return { year, month: month - 1, day }
+}
+
+/** The server's 24-hour "17:30" from the app's "5:30 PM" (and back). */
+export function to24h(time: string): string {
+  const [clock, meridiem] = time.trim().split(' ')
+  const [h, m] = clock.split(':').map(Number)
+  const hours = (h % 12) + (meridiem?.toUpperCase() === 'PM' ? 12 : 0)
+  return `${pad(hours)}:${pad(m || 0)}`
+}
+
+export function from24h(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  return `${h % 12 || 12}:${pad(m || 0)} ${h >= 12 ? 'PM' : 'AM'}`
+}
+
+/** A server timestamp as the app's CalendarDate and "5:30 PM", in IST. */
+export function istParts(at: string | number | Date): { date: CalendarDate; time: string } {
+  const d = new Date(new Date(at).getTime() + 5.5 * 3_600_000)
+  return {
+    date: { year: d.getUTCFullYear(), month: d.getUTCMonth(), day: d.getUTCDate() },
+    time: from24h(`${d.getUTCHours()}:${d.getUTCMinutes()}`),
+  }
+}
 
 export const toIso = (d: CalendarDate) => `${d.year}-${pad(d.month + 1)}-${pad(d.day)}`
 export const sameDate = (a: CalendarDate, b: CalendarDate) => toIso(a) === toIso(b)

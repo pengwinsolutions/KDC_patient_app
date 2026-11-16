@@ -6,6 +6,8 @@ import { getDoctor } from '../store/catalog'
 import { useProfile } from '../store/profile'
 import { MODE_LABEL } from './labels'
 import type { Appointment, AppointmentFeedback } from '../types'
+import { LIVE } from '../services/config'
+import { errorMessage } from '../services/errors'
 
 const shortDate = (a: Appointment) => a.date.replace(/^(Today, |\w+, )/, '')
 
@@ -15,6 +17,13 @@ export async function finishConsultation() {
   call.endCall()
   const id = call.appointmentId
   if (!id) return
+  if (LIVE) {
+    // The doctor completes the consultation on the server; the patient leaves the room and reloads it.
+    const { leaveSession } = require('../services/live/consultations') as typeof import('../services/live/consultations')
+    await leaveSession(id).catch(() => undefined)
+    await useAppointments.getState().complete(id).catch(() => undefined)
+    return
+  }
   const appointments = useAppointments.getState()
   const appointment = appointments.items.find((a) => a.id === id)
   if (!appointment || appointment.status === 'completed') return
@@ -29,8 +38,15 @@ export async function finishConsultation() {
   })
 }
 
-export function submitConsultationFeedback(feedback: AppointmentFeedback) {
+/** Live: sent to the server (once, for a completed consultation); resolves false when it couldn't be saved. */
+export async function submitConsultationFeedback(feedback: AppointmentFeedback): Promise<boolean> {
   const id = useCall.getState().appointmentId
-  if (id) useAppointments.getState().saveFeedback(id, feedback)
+  try {
+    if (id) await useAppointments.getState().saveFeedback(id, feedback)
+  } catch (e) {
+    showToast(errorMessage(e, 'We could not send your feedback. Please try again.'), 'critical')
+    return false
+  }
   showToast('Thanks for your feedback', 'success', `${useProfile.getState().profile.firstName}, it stays anonymous to the doctor`)
+  return true
 }

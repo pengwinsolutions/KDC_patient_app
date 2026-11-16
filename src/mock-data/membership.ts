@@ -29,7 +29,14 @@ export const plans: Plan[] = [
   { id: 'quarter', name: '3 months', price: 849, months: 3, discount: 10 },
 ]
 
-export const planById = (id: string) => plans.find((p) => p.id === id) ?? plans[0]
+/**
+ * Live builds replace these figures in place with the server's plans and caps
+ * (services/live/membership.ts), so every consumer reads what operations set.
+ * Before they load there's no plan: `NO_PLAN`, priced at zero.
+ */
+export const NO_PLAN: Plan = { id: '', name: '', price: 0, months: 12, discount: 0 }
+
+export const planById = (id: string) => plans.find((p) => p.id === id) ?? plans[0] ?? NO_PLAN
 
 /** Per-month equivalent, for comparing plans honestly. */
 export const perMonth = (p: Plan) => Math.round(p.price / p.months)

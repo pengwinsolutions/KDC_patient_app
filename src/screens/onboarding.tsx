@@ -24,6 +24,11 @@ import { SCENE } from '../mock-data/media'
 import { devLaunch, useNav } from '../navigation/navigation'
 import { services } from '../services'
 import { InvalidOtpError } from '../services/auth'
+import { LIVE } from '../services/config'
+import { errorMessage, ServiceError } from '../services/errors'
+import { restoreSession } from '../services/live/http'
+import { loadMe, saveProfile } from '../services/live/me'
+import { syncAll } from '../services/live/sync'
 import {
   formatMobile,
   loginSchema,
@@ -46,20 +51,52 @@ import { pickPhoto } from '../flows/photo'
 
 const SPLASH_MS = 2400
 
+/**
+ * Live: where a signed-in patient lands. Everything is loaded from the server first;
+ * a patient who hasn't finished onboarding completes their profile.
+ */
+export async function enterApp(nav: ReturnType<typeof useNav>) {
+  const me = await loadMe()
+  if (!me.profileCompleted) {
+    nav.resetTo('profile-setup')
+    return
+  }
+  await syncAll()
+  nav.resetTo('home', 'home')
+}
+
+const LIVE_SPLASH_MS = 900
+
 export function SplashScreen() {
   const nav = useNav()
+  const [offline, setOffline] = React.useState(false)
   const advance = React.useCallback(() => {
     nav.navigate(useSession.getState().onboarded ? 'login' : 'onboarding-1', { replace: true })
   }, [nav])
+  const restore = React.useCallback(async () => {
+    setOffline(false)
+    const [state] = await Promise.all([restoreSession(), new Promise<void>((r) => setTimeout(r, LIVE_SPLASH_MS))])
+    if (state === 'signed-out') return advance()
+    if (state === 'offline') return setOffline(true)
+    try {
+      await enterApp(nav)
+    } catch (e) {
+      if (!(e instanceof ServiceError && e.code === 'session_ended')) setOffline(true)
+    }
+  }, [advance, nav])
   React.useEffect(() => {
     if (devLaunch.active) return
+    if (LIVE) {
+      void restore()
+      return
+    }
     const timer = setTimeout(advance, SPLASH_MS)
     return () => clearTimeout(timer)
-  }, [advance])
+  }, [advance, restore])
   return (
     <Screen background="bg-white" padTop={false} padBottom={false}>
       <Btn
-        onPress={advance}
+        onPress={LIVE ? undefined : advance}
         className="relative  h-full w-full flex-col items-center justify-center bg-clinical"
       >
         {/* Faint concentric vitals rings — brand texture, not decoration */}
@@ -85,6 +122,13 @@ export function SplashScreen() {
             Your health in your hands
           </P>
         </Div>
+
+        {offline && (
+          <Div className="mt-8 flex-col items-center gap-3 px-8">
+            <P className="text-center text-body-sm text-ink-500">Can’t reach KDC+. Check your connection and try again.</P>
+            <Button variant="secondary" onClick={() => void restore()}>Try again</Button>
+          </Div>
+        )}
 
         <Div className="absolute inset-x-0  flex-col items-center gap-3" style={{ bottom: DEVICE.safeBottom + 28 }}>
           <Span className="flex-row items-center gap-1.5 text-caption font-medium text-ink-400">
@@ -241,12 +285,17 @@ export function LoginScreen() {
   const setLanguage = useSettings((s) => s.setLanguage)
   const { control, handleSubmit, watch, formState } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { mobile: '98490 42187' },
+    defaultValues: { mobile: LIVE ? '' : '98490 42187' },
   })
   const valid = normalizeMobile(watch('mobile')).length === 10
   const submit = handleSubmit(async ({ mobile }) => {
     const normalized = normalizeMobile(mobile)
-    await services.auth.requestOtp(normalized)
+    try {
+      await services.auth.requestOtp(normalized)
+    } catch (e) {
+      showToast(errorMessage(e, 'We could not send the code. Please try again.'), 'critical')
+      return
+    }
     useSession.getState().setPendingMobile(normalized)
     nav.navigate('otp')
   })
@@ -386,22 +435,28 @@ export function OtpScreen() {
   const [rejected, setRejected] = React.useState<string | null>(null)
   const { control, handleSubmit, setValue, formState, clearErrors } = useForm<OtpForm>({
     resolver: zodResolver(otpSchema),
-    defaultValues: { code: '4821' },
+    defaultValues: { code: LIVE ? '' : '4821' },
   })
   const error = rejected ?? formState.errors.code?.message
 
   const verify = handleSubmit(async ({ code }) => {
     setRejected(null)
     try {
-      const { token, mobile } = await services.auth.verifyOtp(pendingMobile ?? '9849042187', code)
+      const { token, mobile } = await services.auth.verifyOtp(pendingMobile ?? (LIVE ? '' : '9849042187'), code)
       const session = useSession.getState()
       session.signIn(token, mobile)
+      if (LIVE) {
+        await enterApp(nav)
+        return
+      }
       const { profile, setProfile } = useProfile.getState()
       setProfile({ ...profile, mobile: formatMobile(mobile), mobileMasked: maskMobile(mobile) })
       if (session.profileComplete) nav.resetTo('home', 'home')
       else nav.navigate('profile-setup', { replace: true })
     } catch (e) {
-      setRejected(e instanceof InvalidOtpError ? e.message : 'We could not verify the code. Please try again.')
+      setRejected(
+        e instanceof InvalidOtpError || e instanceof ServiceError ? e.message : 'We could not verify the code. Please try again.',
+      )
     }
   })
 
@@ -409,9 +464,13 @@ export function OtpScreen() {
     setRejected(null)
     clearErrors()
     setValue('code', '')
-    const { resendAfterSeconds } = await services.auth.requestOtp(pendingMobile ?? '9849042187')
-    restart(resendAfterSeconds)
-    showToast('A new code is on its way')
+    try {
+      const { resendAfterSeconds } = await services.auth.requestOtp(pendingMobile ?? (LIVE ? '' : '9849042187'))
+      restart(resendAfterSeconds)
+      showToast('A new code is on its way')
+    } catch (e) {
+      showToast(errorMessage(e, 'We could not send a new code. Please try again.'), 'critical')
+    }
   }
 
   return (
@@ -430,7 +489,7 @@ export function OtpScreen() {
           Verification code
         </P>
         <P className="mt-2.5 text-body-lg leading-[23px] text-ink-500">
-          We sent a 6-digit code to <Span className="font-semibold text-ink-900">{maskMobile(pendingMobile ?? '9849042187')}</Span>
+          We sent a 6-digit code to <Span className="font-semibold text-ink-900">{maskMobile(pendingMobile ?? (LIVE ? '' : '9849042187'))}</Span>
         </P>
         <Btn onPress={nav.back} className="tap mt-2 self-start text-body-sm font-bold text-brand-600">
           Change mobile number
@@ -501,12 +560,28 @@ export function ProfileSetupScreen() {
       gender: profile.gender,
       email: profile.email,
       bloodGroup: profile.bloodGroup,
-      consent: true,
+      consent: !LIVE || useSession.getState().profileComplete,
     },
   })
   const name = watch('name')
 
   const save = handleSubmit(async (form) => {
+    if (LIVE) {
+      const firstSave = !useSession.getState().profileComplete
+      try {
+        await saveProfile({ name: form.name, dob: form.dob, gender: form.gender, email: form.email, bloodGroup: form.bloodGroup }, firstSave)
+        if (firstSave) await syncAll()
+      } catch (e) {
+        showToast(errorMessage(e, 'We could not save your profile. Please try again.'), 'critical')
+        return
+      }
+      if (firstSave) nav.resetTo('home', 'home')
+      else {
+        showToast('Profile updated')
+        nav.back()
+      }
+      return
+    }
     const saved = await services.profile.save({
       ...profile,
       name: form.name.trim(),
@@ -541,8 +616,8 @@ export function ProfileSetupScreen() {
           This helps doctors give you safer, more accurate advice.
         </P>
 
-        {/* Avatar picker */}
-        <Div className="mt-7  flex-col items-center">
+        {/* Avatar picker (demo only: live profile photos need authenticated image loading, not built yet) */}
+        {!LIVE && <Div className="mt-7  flex-col items-center">
           <Div className="relative">
             <Avatar src={photo} name={name || profile.name} size={96} radius={32} />
             <IconButton
@@ -556,7 +631,7 @@ export function ProfileSetupScreen() {
             </IconButton>
           </Div>
           <P className="mt-2.5 text-body-sm font-semibold text-brand-600">Add profile photo</P>
-        </Div>
+        </Div>}
 
         <Div className="mt-7 gap-4">
           <FormInput control={control} name="name" label="Full name" required placeholder="As per government ID" />

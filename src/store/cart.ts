@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { CartLine, CartPrescription } from '../types'
 import { seedCart } from '../mock-data/mock'
+import { LIVE } from '../services/config'
 import { persistStorage } from './storage'
 
 interface CartState {
@@ -18,10 +19,13 @@ interface CartState {
   reset: () => void
 }
 
-const seed = {
-  lines: seedCart.lines,
-  prescription: { source: 'kdc', label: seedCart.prescriptionLabel } as CartPrescription,
-}
+/** Live: an empty cart (it isn't kept on the phone). */
+const seed = LIVE
+  ? { lines: [] as CartLine[], prescription: null as CartPrescription | null }
+  : {
+      lines: seedCart.lines,
+      prescription: { source: 'kdc', label: seedCart.prescriptionLabel } as CartPrescription | null,
+    }
 
 export const useCart = create<CartState>()(
   persist(

@@ -68,6 +68,8 @@ import {
   type SortKey,
 } from '../domain/doctorSearch'
 import { MOCK_TODAY } from '../domain/schedule'
+import { LIVE } from '../services/config'
+import { useAvailability, useDoctorDetail, useDoctorReviews } from '../hooks/useCare'
 import { ApiErrorBody, NoResultsBody } from './states'
 
 const SPEC_ICON: Record<string, React.ComponentType<any>> = {
@@ -206,7 +208,7 @@ export function DoctorSearchScreen() {
 
         {/* Specialties */}
         <Div className="mt-6">
-          <SectionHeader title="Browse by specialty" subtitle="24 departments" className="pb-3" />
+          <SectionHeader title="Browse by specialty" subtitle={LIVE ? plural(specialties.length, 'department') : '24 departments'} className="pb-3" />
           <Div className=" grid-cols-3 gap-2.5 px-5">
             {specialties.map((s) => {
               const Icon = SPEC_ICON[s.icon] ?? Stethoscope
@@ -360,6 +362,7 @@ function FeeRange({ min, max, onChange }: { min: number; max: number; onChange: 
 export function FiltersSheetScreen() {
   const nav = useNav()
   const doctors = useCatalog((s) => s.doctors)
+  const specialties = useCatalog((s) => s.specialties)
   const discovery = useDiscovery.getState()
   const [filters, setFilters] = React.useState<DoctorFilters>(() => sheetFiltersFor(discovery))
   /* The first view quotes the blueprint's catalogue size, not this local sample. */
@@ -371,7 +374,14 @@ export function FiltersSheetScreen() {
   const toggle = <K extends 'specialty' | 'availability' | 'mode' | 'experience' | 'distance'>(key: K, value: DoctorFilters[K]) =>
     update({ [key]: filters[key] === value ? null : value } as Partial<DoctorFilters>)
 
-  const count = touched ? searchDoctors(doctors, { text: discovery.query.text, filters, sort: 'Relevance' }).length : 38
+  /* Live: the directory counts the matches itself. */
+  const matching = useDoctorSearch({ text: discovery.query.text, filters, sort: 'Relevance' }, LIVE)
+  const count = LIVE
+    ? matching.data?.length ?? 0
+    : touched
+      ? searchDoctors(doctors, { text: discovery.query.text, filters, sort: 'Relevance' }).length
+      : 38
+  const sheetSpecialties = LIVE ? specialties.map((x) => x.name) : SHEET_SPECIALTIES
   const apply = () => {
     useDiscovery.getState().applyFilters(filters)
     if (nav.from === 'doctor-list') nav.back()
@@ -408,7 +418,7 @@ export function FiltersSheetScreen() {
       >
         <Div className="gap-5 pb-2">
           <FilterGroup title="Specialty">
-            {SHEET_SPECIALTIES.map((x) => (
+            {sheetSpecialties.map((x) => (
               <FilterChip key={x} active={filters.specialty === x} onClick={() => toggle('specialty', x)}>
                 {x}
               </FilterChip>
@@ -476,13 +486,16 @@ export function FiltersSheetScreen() {
             ))}
           </FilterGroup>
 
-          <FilterGroup title="Location">
-            {DISTANCES.map((x) => (
-              <FilterChip key={x} active={filters.distance === x} onClick={() => toggle('distance', x)} icon={<MapPin className="h-[12px] w-[12px]" />}>
-                {x}
-              </FilterChip>
-            ))}
-          </FilterGroup>
+          {/* Live: distance needs the patient's location, which the app doesn't ask for yet. */}
+          {!LIVE && (
+            <FilterGroup title="Location">
+              {DISTANCES.map((x) => (
+                <FilterChip key={x} active={filters.distance === x} onClick={() => toggle('distance', x)} icon={<MapPin className="h-[12px] w-[12px]" />}>
+                  {x}
+                </FilterChip>
+              ))}
+            </FilterGroup>
+          )}
         </Div>
       </BottomSheet>
     </Screen>
@@ -577,15 +590,43 @@ export function DoctorProfileScreen() {
   const booking = useBooking()
   const saved = useDiscovery((s) => s.savedDoctorIds.includes(d.id))
   const toggleSaved = useDiscovery((s) => s.toggleSaved)
-  const reviews = reviewsFor(d.id)
-  const days = [
-    { date: 5, dow: 'Sun', slots: 4 },
-    { date: 6, dow: 'Mon', slots: 9 },
-    { date: 7, dow: 'Tue', slots: 7 },
-    { date: 8, dow: 'Wed', slots: 0, disabled: true },
-    { date: 9, dow: 'Thu', slots: 11 },
-    { date: 10, dow: 'Fri', slots: 6 },
-  ]
+  useDoctorDetail(d.id)
+  const liveReviews = useDoctorReviews(d.id).data
+  const reviews = LIVE ? liveReviews?.reviews ?? [] : reviewsFor(d.id)
+  const distribution = LIVE
+    ? liveReviews?.distribution ?? [5, 4, 3, 2, 1].map((n) => ({ n, pct: 0 }))
+    : [
+        { n: 5, pct: 86 },
+        { n: 4, pct: 10 },
+        { n: 3, pct: 3 },
+        { n: 2, pct: 1 },
+        { n: 1, pct: 0 },
+      ]
+  const recommend = LIVE ? (liveReviews?.recommendPct != null ? `${liveReviews.recommendPct}%` : '—') : `${d.recommendPct}%`
+  const consults = LIVE && d.consults < 1000 ? String(d.consults) : `${(d.consults / 1000).toFixed(1)}k`
+  const liveMode: ConsultMode = d.modes?.includes(booking.mode) ? booking.mode : d.modes?.[0] ?? 'video'
+  const week = useAvailability(d.id, liveMode, MOCK_TODAY, 6).data
+  const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const liveDays = (week?.days ?? []).map((x) => ({
+    date: x.date.day,
+    dow: DOW[new Date(x.date.year, x.date.month, x.date.day).getDay()],
+    slots: x.freeSlots,
+    disabled: x.closed || x.freeSlots === 0,
+    value: x.date,
+  }))
+  const days = LIVE
+    ? liveDays
+    : [
+        { date: 5, dow: 'Sun', slots: 4 },
+        { date: 6, dow: 'Mon', slots: 9 },
+        { date: 7, dow: 'Tue', slots: 7 },
+        { date: 8, dow: 'Wed', slots: 0, disabled: true },
+        { date: 9, dow: 'Thu', slots: 11 },
+        { date: 10, dow: 'Fri', slots: 6 },
+      ]
+  const fees = (LIVE ? d.modes ?? [] : (['video', 'audio', 'clinic'] as ConsultMode[]))
+  const lowest = LIVE ? Math.min(...fees.map((m) => d.fees[m]).filter((f) => f > 0), Infinity) : d.fees.audio
+  const fromFee = Number.isFinite(lowest) ? lowest : 0
 
   return (
     <Screen background="bg-canvas" padTop={false} padBottom={false}>
@@ -640,16 +681,16 @@ export function DoctorProfileScreen() {
         {/* Credibility strip */}
         <Div className="relative z-10 mx-5 -mt-6  grid-cols-4 divide-x divide-ink-100 rounded-card bg-white py-3.5 shadow-card">
           <Stat value={`${d.experience}+`} label="Years" Icon={Award} />
-          <Stat value={`${(d.consults / 1000).toFixed(1)}k`} label="Consults" Icon={Users} />
-          <Stat value={d.rating.toFixed(1)} label="Rating" Icon={Heart} />
-          <Stat value={`${d.recommendPct}%`} label="Recommend" Icon={ThumbsUp} />
+          <Stat value={consults} label="Consults" Icon={Users} />
+          <Stat value={LIVE && !d.reviews ? '—' : d.rating.toFixed(1)} label="Rating" Icon={Heart} />
+          <Stat value={recommend} label="Recommend" Icon={ThumbsUp} />
         </Div>
 
         {/* Fees */}
         <Div className="mt-5 px-5">
           <SectionHeader title="Consultation fees" className="!px-0 pb-3" />
           <Div className=" grid-cols-3 gap-2.5">
-            {(['video', 'audio', 'clinic'] as ConsultMode[]).map((m) => (
+            {fees.map((m) => (
               <Div key={m} className="rounded-tile bg-white p-3 shadow-tile">
                 <ModeIcon mode={m} size={16} />
                 <P className="mt-2 text-[11px] font-semibold text-ink-500">{MODE[m].label}</P>
@@ -671,7 +712,12 @@ export function DoctorProfileScreen() {
             days={days}
             selected={booking.date.day}
             onSelect={(day) => {
-              booking.setDate({ ...MOCK_TODAY, day })
+              if (LIVE) {
+                const picked = liveDays.find((x) => x.date === day)
+                if (!picked) return
+                if (booking.mode !== liveMode) booking.setMode(liveMode)
+                booking.setDate(picked.value)
+              } else booking.setDate({ ...MOCK_TODAY, day })
               nav.navigate('select-slot')
             }}
           />
@@ -681,7 +727,7 @@ export function DoctorProfileScreen() {
         <Div className="mt-6 px-5">
           <SectionHeader title="About" className="!px-0 pb-2.5" />
           <Card elevation="tile">
-            <P className="text-body leading-[22px] text-ink-600">{d.about}</P>
+            <P className="text-body leading-[22px] text-ink-600">{d.about || (LIVE ? 'The doctor hasn’t added an introduction yet.' : '')}</P>
           </Card>
         </Div>
 
@@ -697,22 +743,24 @@ export function DoctorProfileScreen() {
             ))}
             <Div className="flex-row items-center gap-2 text-caption text-ink-400">
               <Award className="h-[13px] w-[13px]" strokeWidth={2.2} />
-              Reg. No. {d.regNo} · Telangana State Medical Council
+              Reg. No. {d.regNo} · {LIVE ? d.council ?? '' : 'Telangana State Medical Council'}
             </Div>
           </Card>
         </Div>
 
         {/* Specialisation */}
-        <Div className="mt-5 px-5">
-          <SectionHeader title="Areas of specialisation" className="!px-0 pb-2.5" />
-          <Div className="flex-row flex-wrap gap-2">
-            {d.areas.map((s) => (
-              <MetaChip key={s} className="!bg-white !py-1.5 shadow-tile">
-                {s}
-              </MetaChip>
-            ))}
+        {d.areas.length > 0 && (
+          <Div className="mt-5 px-5">
+            <SectionHeader title="Areas of specialisation" className="!px-0 pb-2.5" />
+            <Div className="flex-row flex-wrap gap-2">
+              {d.areas.map((s) => (
+                <MetaChip key={s} className="!bg-white !py-1.5 shadow-tile">
+                  {s}
+                </MetaChip>
+              ))}
+            </Div>
           </Div>
-        </Div>
+        )}
 
         {/* Languages */}
         <Div className="mt-5 px-5">
@@ -748,13 +796,7 @@ export function DoctorProfileScreen() {
                   <P className="mt-1 text-caption text-ink-400">{d.reviews.toLocaleString('en-IN')} ratings</P>
                 </Div>
                 <Div className="flex-1 gap-1.5">
-                  {[
-                    { n: 5, pct: 86 },
-                    { n: 4, pct: 10 },
-                    { n: 3, pct: 3 },
-                    { n: 2, pct: 1 },
-                    { n: 1, pct: 0 },
-                  ].map((r) => (
+                  {distribution.map((r) => (
                     <Div key={r.n} className="flex-row items-center gap-2">
                       <Span className="w-[8px] text-caption tabular-nums text-ink-400">{r.n}</Span>
                       <Div className="h-[5px] flex-1 overflow-hidden rounded-full bg-ink-100">
@@ -793,16 +835,16 @@ export function DoctorProfileScreen() {
           <Div className="min-w-0">
             <P className="text-caption text-ink-400">Starts from</P>
             <Span className="inline-flex flex-row items-baseline gap-1.5">
-              <Span className="text-title-sm text-ink-900">{rupee(memberPrice(d.fees.audio, 'consultations'))}</Span>
-              {memberPrice(d.fees.audio, 'consultations') !== d.fees.audio && (
+              <Span className="text-title-sm text-ink-900">{rupee(memberPrice(fromFee, 'consultations'))}</Span>
+              {memberPrice(fromFee, 'consultations') !== fromFee && (
                 <>
-                  <Span className="text-caption tabular-nums text-ink-300 line-through">{rupee(d.fees.audio)}</Span>
+                  <Span className="text-caption tabular-nums text-ink-300 line-through">{rupee(fromFee)}</Span>
                   <PlusTag size="xs" />
                 </>
               )}
             </Span>
           </Div>
-          <Button className="flex-1" onClick={() => nav.navigate('consult-type')}>
+          <Button className="flex-1" disabled={LIVE && (!d.id || d.onLeave)} onClick={() => nav.navigate('consult-type')}>
             Book Consultation
           </Button>
         </Div>

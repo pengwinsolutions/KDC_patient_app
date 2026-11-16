@@ -20,10 +20,13 @@ import { Card, SectionHeader, KeyValue, Divider, StatusBadge } from '../componen
 import { Modal } from '../components/ui/Feedback'
 import { PlusTag } from '../components/ui/Membership'
 import { rupee } from '../mock-data/mock'
-import { plans, perMonth, planById, benefits, planConfig } from '../mock-data/membership'
+import { perMonth, planById, benefits, planConfig } from '../mock-data/membership'
 import { useNav } from '../navigation/navigation'
 import { savedByArea, totalSaved, useMembership } from '../store/membership'
-import { usePayments } from '../store/payments'
+import { PAY_ONLINE, usePayments } from '../store/payments'
+import { LIVE } from '../services/config'
+import { errorMessage } from '../services/errors'
+import { endMembership } from '../services/live/membership'
 import { useCheckout } from '../flows/payment'
 import { planTotals } from '../domain/pricing'
 import { renewalLabel } from '../services/account'
@@ -45,6 +48,8 @@ export function MembershipScreen() {
   const nav = useNav()
   const picked = useMembership((s) => s.pickedPlanId)
   const setPicked = useMembership((s) => s.pickPlan)
+  // The plans on sale: bundled in demo, the server's in live (re-renders when they load).
+  const plans = useMembership((s) => s.plans)
   const plan = planById(picked)
 
   return (
@@ -195,14 +200,17 @@ export function MembershipScreen() {
 export function MembershipCheckoutScreen() {
   const nav = useNav()
   const membership = useMembership()
-  const methods = usePayments((s) => s.methods)
-  const selectedMethod = usePayments((s) => s.selectedMethodId)
+  const savedMethods = usePayments((s) => s.methods)
+  // Live: one way to pay, Razorpay Checkout (UPI, cards, net banking, wallets).
+  const methods = LIVE ? [PAY_ONLINE] : savedMethods
+  const selectedMethod = usePayments((s) => (LIVE ? PAY_ONLINE.id : s.selectedMethodId))
   const selectMethod = usePayments((s) => s.select)
   const plan = planById(membership.pickedPlanId)
   const { gst, total } = planTotals(plan)
   const renews =
     membership.status === 'active' && membership.planId === plan.id ? membership.renews : renewalLabel(plan, new Date())
   const pay = () => {
+    if (LIVE) usePayments.getState().select(PAY_ONLINE.id)
     useCheckout.getState().start({
       kind: 'membership',
       amount: total,
@@ -257,7 +265,7 @@ export function MembershipCheckoutScreen() {
         <Div>
           <SectionHeader title="Pay using" className="!px-0 pb-2.5" />
           <Div className="gap-2">
-            {methods.filter((p) => p.kind === 'upi' || p.kind === 'card').slice(0, 2).map((p) => {
+            {methods.filter((p) => p.kind === 'upi' || p.kind === 'card' || p.kind === 'online').slice(0, 2).map((p) => {
               const on = p.id === selectedMethod
               return (
               <Div
@@ -268,7 +276,7 @@ export function MembershipCheckoutScreen() {
                 }`}
               >
                 <Span className="flex-col h-[38px] w-[38px] shrink-0 items-center justify-center rounded-[11px] bg-ink-50 text-[11px] font-bold text-ink-600">
-                  {p.kind === 'upi' ? 'UPI' : 'CARD'}
+                  {p.kind === 'upi' ? 'UPI' : p.kind === 'online' ? 'PAY' : 'CARD'}
                 </Span>
                 <Div className="min-w-0 flex-1">
                   <P className="truncate text-body-lg font-semibold text-ink-900">{p.label}</P>
@@ -382,8 +390,16 @@ export function MembershipManageScreen() {
     setConfirmingStop(false)
     showToast('Auto-renew turned off', 'success', `Your member rate continues until ${membership.renews}`)
   }
-  const endNow = () => {
-    membership.expire()
+  const endNow = async () => {
+    if (LIVE) {
+      try {
+        await endMembership()
+      } catch (e) {
+        setConfirmingStop(false)
+        showToast(errorMessage(e, 'We could not end your membership. Please try again.'), 'critical')
+        return
+      }
+    } else membership.expire()
     nav.navigate('st-membership-expired', { replace: true })
   }
 

@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import { LIVE } from '../services/config'
+import type { Inflight } from '../services/live/flows-payment'
 import type { BenefitArea, CartLine, CollectionMethod, ConsultMode, PaymentMethod, PaymentRecord } from '../types'
 import type { Bill } from '../domain/pricing'
 import { services } from '../services'
@@ -48,6 +50,10 @@ export type PaymentIntent = {
 
 interface CheckoutState {
   intent: PaymentIntent | null
+  /** Live: the purchase the server is holding for this intent, kept so a retry pays the same one. */
+  inflight: Inflight | null
+  /** Live: why the last attempt didn't complete (the failed screen shows it). */
+  lastFailure: Extract<PaymentOutcome, { ok: false }> | null
   start: (intent: PaymentIntent) => void
   clear: () => void
 }
@@ -55,13 +61,16 @@ interface CheckoutState {
 /** The payment in flight. Not persisted: a restart should never resume a charge. */
 export const useCheckout = create<CheckoutState>((set) => ({
   intent: null,
-  start: (intent) => set({ intent }),
-  clear: () => set({ intent: null }),
+  inflight: null,
+  lastFailure: null,
+  // A new intent keeps the hold only when it's the same purchase (flows-payment's purchaseKey decides).
+  start: (intent) => set({ intent, lastFailure: null }),
+  clear: () => set({ intent: null, inflight: null, lastFailure: null }),
 }))
 
 export type PaymentOutcome =
   | { ok: true; screen: string; params?: Record<string, unknown> }
-  | { ok: false; reason: string }
+  | { ok: false; reason: string; cancelled?: boolean; pending?: boolean }
 
 const today = () => formatShortYear(MOCK_TODAY).replace(/^\w+, /, '')
 
@@ -164,6 +173,18 @@ async function fulfil(intent: PaymentIntent, method: PaymentMethod): Promise<Ext
 export async function runPayment(): Promise<PaymentOutcome> {
   const { intent, clear } = useCheckout.getState()
   if (!intent) return { ok: false, reason: 'No payment in progress.' }
+  if (LIVE) {
+    const live = require('../services/live/flows-payment') as typeof import('../services/live/flows-payment')
+    const outcome = await live.runLivePayment(intent, useCheckout.getState().inflight, (inflight) => useCheckout.setState({ inflight }))
+    if (outcome.ok) {
+      // What was bought is gone from the drafts, as in the demo's checkout.
+      if (intent.kind === 'pharmacy') useCart.getState().clear()
+      else if (intent.kind === 'diagnostic') useDiagnosticsDraft.getState().reset()
+      else if (intent.kind === 'consultation') useBooking.getState().clearSlot()
+      clear()
+    } else useCheckout.setState({ lastFailure: outcome })
+    return outcome
+  }
   const payments = usePayments.getState()
   const method = methodById(payments.methods, payments.selectedMethodId)
   const result =

@@ -11,13 +11,18 @@ import { BLOOD_GROUPS, ChoiceChips, FormInput } from '../components/forms/Fields
 import { Button, StickyBar } from '../components/ui/Button'
 import { rupee } from '../mock-data/mock'
 import { useNav } from '../navigation/navigation'
+import { syncOne } from '../services/live/sync'
+import '../services/live/sync-commerce'
 import { useOrders } from '../store/orders'
 import { getLab, getMedicine, getTest } from '../store/catalog'
 import { useProfile } from '../store/profile'
 import { useNow } from '../hooks/useNow'
 import { services } from '../services'
 import { diagnosticRow, orderTestTitle, pharmacyRow, type OrderRow } from '../domain/orderTracking'
-import { formatMobile, medicalSchema, type MedicalForm } from '../validation/schemas'
+import { formatMobile, medicalSchema, medicalSchemaLive, type MedicalForm } from '../validation/schemas'
+import { LIVE } from '../services/config'
+import { errorMessage } from '../services/errors'
+import { showToast } from '../store/toast'
 
 /* ======================================== 34a — Orders (pharmacy + labs) == */
 
@@ -33,8 +38,11 @@ export function OrdersScreen() {
   const diagnostics = useOrders((s) => s.diagnostics)
   const now = useNow(5000)
   const [segment, setSegment] = React.useState<'all' | 'meds' | 'tests'>('all')
+  useLiveOrdersRefresh()
   const pharmacyRows = pharmacy.map((o) => pharmacyRow(o, (id) => getMedicine(id).name, now))
-  const testRows = diagnostics.map((o) => diagnosticRow(o, orderTestTitle(getTest(o.testId)), getLab(o.labId).name, now))
+  const testRows = diagnostics.map((o) =>
+    diagnosticRow(o, o.title || orderTestTitle(getTest(o.testId)), o.labName ?? getLab(o.labId).name, now),
+  )
   const showing = (r: OrderRow) => segment === 'all' || (segment === 'meds' ? r.kind === 'pharmacy' : r.kind === 'diagnostics')
   const active = [...pharmacyRows, ...testRows].filter((o) => o.live && showing(o))
   const past = [...testRows, ...pharmacyRows].filter((o) => !o.live && showing(o))
@@ -98,6 +106,17 @@ export function OrdersScreen() {
   )
 }
 
+/** Live: the server's orders, reloaded when the screen opens and every 30 seconds while it's showing. */
+export function useLiveOrdersRefresh() {
+  React.useEffect(() => {
+    if (!LIVE) return
+    const reload = () => void syncOne('orders').catch(() => undefined)
+    reload()
+    const timer = setInterval(reload, 30_000)
+    return () => clearInterval(timer)
+  }, [])
+}
+
 function OrderCard({ order, onClick }: { order: OrderRow; onClick?: () => void }) {
   const Icon = order.kind === 'pharmacy' ? Pill : FlaskConical
   return (
@@ -153,7 +172,7 @@ export function MedicalInfoEditScreen() {
     surgeries: medical.surgeries,
   })
   const { control, handleSubmit, watch, setValue, formState } = useForm<MedicalForm>({
-    resolver: zodResolver(medicalSchema),
+    resolver: zodResolver(LIVE ? (medicalSchemaLive as unknown as typeof medicalSchema) : medicalSchema),
     defaultValues: {
       bloodGroup: medical.bloodGroup,
       height: medical.height,
@@ -169,17 +188,24 @@ export function MedicalInfoEditScreen() {
     setLists((l) => ({ ...l, [key]: l[key].filter((v) => v !== value) }))
 
   const save = handleSubmit(async (form) => {
-    const saved = await services.profile.saveMedical({
-      ...lists,
-      bloodGroup: form.bloodGroup,
-      height: `${form.height.replace(/\s*cm$/i, '')} cm`,
-      weight: `${form.weight.replace(/\s*kg$/i, '')} kg`,
-      emergency: {
-        name: form.emergencyName.trim(),
-        relation: form.emergencyRelation.trim(),
-        mobile: formatMobile(form.emergencyMobile),
-      },
-    })
+    const unit = (v: string, u: string) => (v.trim() ? `${v.replace(new RegExp(`\\s*${u}$`, 'i'), '')} ${u}` : '')
+    let saved
+    try {
+      saved = await services.profile.saveMedical({
+        ...lists,
+        bloodGroup: form.bloodGroup,
+        height: LIVE ? unit(form.height, 'cm') : `${form.height.replace(/\s*cm$/i, '')} cm`,
+        weight: LIVE ? unit(form.weight, 'kg') : `${form.weight.replace(/\s*kg$/i, '')} kg`,
+        emergency: {
+          name: form.emergencyName.trim(),
+          relation: form.emergencyRelation.trim(),
+          mobile: form.emergencyMobile.trim() ? formatMobile(form.emergencyMobile) : '',
+        },
+      })
+    } catch (e) {
+      showToast(errorMessage(e, 'Could not save your medical information. Please try again.'), 'critical')
+      return
+    }
     useProfile.getState().setMedical(saved)
     nav.back()
   })

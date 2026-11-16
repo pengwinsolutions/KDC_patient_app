@@ -17,6 +17,11 @@ import {
   type MembershipService,
   type ProfileService,
 } from './account'
+import { LIVE } from './config'
+import { liveAuthService } from './live/auth'
+import './live/sync-care'
+import './live/sync-money'
+import { liveAddressesService, liveFamilyService, liveProfileService } from './live/account'
 
 export interface Services {
   auth: AuthService
@@ -33,18 +38,22 @@ export interface Services {
   help: HelpService
 }
 
-/** The single switch point: a NestJS client implementing `Services` replaces this object. */
+/**
+ * The single switch point. Live builds use `services/live/*` (the KDC+ backend) where a
+ * service applies; the live flows (`services/live/flows-*.ts`) call the backend directly
+ * where the mock interfaces don't fit a server that decides prices, slots and stock.
+ */
 export const services: Services = {
-  auth: mockAuthService,
+  auth: LIVE ? liveAuthService : mockAuthService,
   doctors: mockDoctorsService,
   appointments: mockAppointmentsService,
   payments: mockPaymentsService,
   pharmacy: mockPharmacyService,
   diagnostics: mockDiagnosticsService,
   documents: mockDocumentsService,
-  family: mockFamilyService,
-  addresses: mockAddressesService,
-  profile: mockProfileService,
+  family: LIVE ? liveFamilyService : mockFamilyService,
+  addresses: LIVE ? liveAddressesService : mockAddressesService,
+  profile: LIVE ? liveProfileService : mockProfileService,
   membership: mockMembershipService,
   help: mockHelpService,
 }

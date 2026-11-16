@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { MedicalInfo, Profile } from '../types'
 import { medicalInfo, patient } from '../mock-data/mock'
+import { LIVE } from '../services/config'
 import { persistStorage } from './storage'
 
 interface ProfileState {
@@ -12,7 +13,11 @@ interface ProfileState {
   reset: () => void
 }
 
-const seed = { profile: patient, medical: medicalInfo }
+/** Live: blank until GET /patient/me and the medical record load. */
+export const NO_PROFILE: Profile = { id: '', name: '', firstName: '', mobile: '', mobileMasked: '', email: '', dob: '', age: 0, gender: '', bloodGroup: '', city: '' }
+export const NO_MEDICAL: MedicalInfo = { bloodGroup: '', allergies: [], conditions: [], medications: [], surgeries: [], emergency: { name: '', relation: '', mobile: '' }, height: '', weight: '' }
+
+const seed = LIVE ? { profile: NO_PROFILE, medical: NO_MEDICAL } : { profile: patient, medical: medicalInfo }
 
 export const useProfile = create<ProfileState>()(
   persist(

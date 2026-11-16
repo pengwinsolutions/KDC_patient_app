@@ -56,9 +56,16 @@ import { usePayments } from '../store/payments'
 import { showToast } from '../store/toast'
 import { usePricing } from '../hooks/usePricing'
 import { useNow } from '../hooks/useNow'
-import { useTestSearch } from '../hooks/queries'
-import { cheapestLabPrice, searchReports, sortLabs, type LabSort, type ReportFilter, type TestFilter } from '../domain/catalogue'
-import { collectionWindow, diagnosticSlots, formatShort } from '../domain/schedule'
+import { useQuery } from '@tanstack/react-query'
+import { useLabsFor, useTestDetail, useTestSearch } from '../hooks/queries'
+import { cheapestLabPrice, labPriceFor, searchReports, sortLabs, type LabSort, type ReportFilter, type TestFilter } from '../domain/catalogue'
+import { collectionWindow, diagnosticSlots, formatShort, istParts, MOCK_TODAY, MONTH_NAMES, toIso, type CalendarDate } from '../domain/schedule'
+import { LIVE } from '../services/config'
+import { errorMessage } from '../services/errors'
+import { loadLabBooking, loadLabSlots, slotGroups } from '../services/live/diagnostics'
+import { loadReport, useReportDetails } from '../services/live/reports'
+import { syncOne } from '../services/live/sync'
+import '../services/live/sync-commerce'
 import { currentStage, DIAGNOSTIC_STAGES, stageState } from '../domain/orderTracking'
 import { labTestPrice } from '../domain/pricing'
 import { NoResultsBody } from './states'
@@ -84,7 +91,10 @@ function useDraftPrice() {
   const method = useDiagnosticsDraft((s) => s.method)
   const test = getTest(testId ?? PREVIEW_BILLED_TEST)
   const lab = getLab(labId)
-  return labTestPrice(test.price, lab.price) - (method === 'Lab Visit' ? 50 : 0)
+  useCatalog((s) => s.labs)
+  const visitDiscount = method === 'Lab Visit' ? 50 : 0
+  if (LIVE) return Math.max(0, (lab.id ? labPriceFor(test, lab) : test.price) - visitDiscount)
+  return labTestPrice(test.price, lab.price) - visitDiscount
 }
 
 const CAT_ICON: Record<string, React.ComponentType<any>> = {
@@ -96,6 +106,12 @@ const CAT_ICON: Record<string, React.ComponentType<any>> = {
   Liver: Microscope,
   Kidney: Microscope,
   'Women’s Health': Activity,
+}
+
+/** Live: the catalogue's full-body packages, or its first tests when there are none. */
+const healthPackages = (tests: LabTest[]) => {
+  const packages = tests.filter((t) => t.category === 'Full Body Checkup')
+  return (packages.length ? packages : tests).slice(0, 3)
 }
 
 /* =========================================== 35 — Diagnostics home ======== */
@@ -119,7 +135,7 @@ export function DiagnosticsHomeScreen() {
         {/* Home collection promo */}
         <Div className="px-5 pt-4">
           <Btn
-            onPress={() => nav.navigate('collection-method')}
+            onPress={() => (LIVE ? nav.navigate('test-search', { params: { q: '' } }) : nav.navigate('collection-method'))}
             className="tap relative w-full overflow-hidden rounded-card text-left shadow-card"
           >
             <Img src={SCENE.homeCollection} alt="" className="h-[134px] w-full object-cover" />
@@ -171,7 +187,7 @@ export function DiagnosticsHomeScreen() {
             className="pb-3"
           />
           <HScroll>
-            {[labTests[7], labTests[1], labTests[3]].map((t) => (
+            {(LIVE ? healthPackages(labTests) : [labTests[7], labTests[1], labTests[3]]).map((t) => (
               <Btn
                 key={t.id}
                 onPress={() => nav.navigate('test-detail', { params: { id: t.id } })}
@@ -246,7 +262,7 @@ export function TestSearchScreen() {
       <Div className="sticky z-30 bg-white" style={{ marginTop: -DEVICE.safeTop, paddingTop: DEVICE.safeTop, top: -DEVICE.safeTop }}>
         <ScreenHeader embedded title="Search tests" subtitle={category} border={false} />
         <Div className="px-5 pb-3">
-          <SearchInput placeholder="Search tests" value={text ?? 'profile'} onChange={setText} />
+          <SearchInput placeholder="Search tests" value={text ?? (LIVE ? '' : 'profile')} onChange={setText} />
         </Div>
         <Div className="pb-3">
           <HScroll gap={8}>
@@ -279,11 +295,16 @@ export function TestSearchScreen() {
 
 export function TestDetailScreen() {
   const nav = useNav()
-  const t = getTest(nav.params.id ?? PREVIEW_DETAIL_TEST)
+  const id: string = nav.params.id ?? (LIVE ? '' : PREVIEW_DETAIL_TEST)
+  /* Live: the test's details and the labs that offer it load from the server; this re-renders when they arrive. */
+  useTestDetail(id)
+  useLabsFor(id)
+  useCatalog((s) => s.labTests)
+  const t = getTest(id)
   const detail = getTestDetail(t.id)
   const labs = useCatalog((s) => s.labs)
   const { memberPrice } = usePricing()
-  const off = Math.round(((t.mrp - t.price) / t.mrp) * 100)
+  const off = t.mrp ? Math.round(((t.mrp - t.price) / t.mrp) * 100) : 0
   const startsFrom = nav.params.id ? cheapestLabPrice(t, labs) : 480
 
   return (
@@ -415,7 +436,9 @@ export function LabSelectScreen() {
   const described = getTest(draft.testId ?? PREVIEW_DETAIL_TEST)
   const billed = getTest(draft.testId ?? PREVIEW_BILLED_TEST)
   const selected = getLab(draft.labId)
-  const sorted = sortLabs(labs, sort)
+  /* Live: only the labs that price this test, as the server lists them. */
+  const offered = useLabsFor(draft.testId)
+  const sorted = sortLabs(LIVE ? labs.filter((l) => billed.id in (l.testPrices ?? {})) : labs, sort)
   return (
     <Screen background="bg-canvas" padBottom={false}>
       <ScreenHeader title="Choose a lab" subtitle={described.name} />
@@ -432,11 +455,15 @@ export function LabSelectScreen() {
         </Div>
 
         <Div className="gap-2.5">
+          {LIVE && offered.isPending && [0, 1].map((i) => <Skeleton key={i} className="h-[120px] w-full" rounded={20} />)}
+          {LIVE && !offered.isPending && sorted.length === 0 && (
+            <NoResultsBody body={offered.isError ? errorMessage(offered.error) : 'No partner lab offers this test yet.'} />
+          )}
           {sorted.map((l) => (
             <LabCard
               key={l.id}
               lab={l}
-              price={labTestPrice(billed.price, l.price)}
+              price={labPriceFor(billed, l)}
               selected={l.id === draft.labId}
               onClick={() => {
                 draft.setLab(l.id)
@@ -458,10 +485,12 @@ export function LabSelectScreen() {
 
       <StickyBar>
         <Div className="mb-3 flex-row items-center justify-between">
-          <Span className="text-body-sm text-ink-500">{selected.name} · {selected.distanceKm} km</Span>
-          <Span className="text-title-sm text-ink-900">{rupee(labTestPrice(billed.price, selected.price))}</Span>
+          <Span className="text-body-sm text-ink-500">
+            {LIVE ? selected.name || 'Choose a lab' : `${selected.name} · ${selected.distanceKm} km`}
+          </Span>
+          <Span className="text-title-sm text-ink-900">{selected.id ? rupee(labPriceFor(billed, selected)) : ''}</Span>
         </Div>
-        <Button onClick={() => nav.navigate('collection-method')}>Continue</Button>
+        <Button disabled={LIVE && !selected.id} onClick={() => nav.navigate('collection-method')}>Continue</Button>
       </StickyBar>
     </Screen>
   )
@@ -577,23 +606,52 @@ export function CollectionMethodScreen() {
 
 /* ============================================== 40 — Diagnostic slot ====== */
 
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+/** Live: the next six days from today (IST), with each day's collection slots from the server. */
+function useLiveSlotDays(enabled: boolean) {
+  const dates: CalendarDate[] = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(Date.UTC(MOCK_TODAY.year, MOCK_TODAY.month, MOCK_TODAY.day + i))
+    return { year: d.getUTCFullYear(), month: d.getUTCMonth(), day: d.getUTCDate() }
+  })
+  const query = useQuery({
+    queryKey: ['lab-slot-days', toIso(dates[0])],
+    queryFn: () => Promise.all(dates.map((d) => loadLabSlots(toIso(d)))),
+    enabled,
+    staleTime: 30_000,
+  })
+  return { dates, slots: query.data, pending: query.isPending, error: query.error }
+}
+
 export function DiagnosticSlotScreen() {
   const nav = useNav()
   const draft = useDiagnosticsDraft()
   const pricing = usePricing()
   const price = useDraftPrice()
   const described = getTest(draft.testId ?? PREVIEW_DETAIL_TEST)
-  const groups = diagnosticSlots(draft.date.day, draft.time)
+  const live = useLiveSlotDays(LIVE)
+  const liveIndex = live.dates.findIndex((d) => toIso(d) === toIso(draft.date))
+  const groups = LIVE ? slotGroups(live.slots?.[liveIndex] ?? [], draft.time) : diagnosticSlots(draft.date.day, draft.time)
   const window = draft.time ? collectionWindow(draft.time) : null
   const member = pricing.memberPrice(price, 'diagnostics')
-  const days = [
-    { date: 6, dow: 'Mon', slots: 3 },
-    { date: 7, dow: 'Tue', slots: 8 },
-    { date: 8, dow: 'Wed', slots: 6 },
-    { date: 9, dow: 'Thu', slots: 0, disabled: true },
-    { date: 10, dow: 'Fri', slots: 9 },
-    { date: 11, dow: 'Sat', slots: 5 },
-  ]
+  const days = LIVE
+    ? live.dates.map((d, i) => {
+        const free = live.slots?.[i]?.filter((x) => x.available).length ?? 0
+        return { date: d.day, dow: DOW[new Date(Date.UTC(d.year, d.month, d.day)).getUTCDay()], slots: free, disabled: Boolean(live.slots) && free === 0 }
+      })
+    : [
+        { date: 6, dow: 'Mon', slots: 3 },
+        { date: 7, dow: 'Tue', slots: 8 },
+        { date: 8, dow: 'Wed', slots: 6 },
+        { date: 9, dow: 'Thu', slots: 0, disabled: true },
+        { date: 10, dow: 'Fri', slots: 9 },
+        { date: 11, dow: 'Sat', slots: 5 },
+      ]
+  const selectDay = (day: number) => {
+    if (!LIVE) return draft.setDay(day)
+    const date = live.dates.find((d) => d.day === day)
+    if (date) draft.setDate(date)
+  }
 
   return (
     <Screen background="bg-canvas" padBottom={false}>
@@ -612,9 +670,13 @@ export function DiagnosticSlotScreen() {
         )}
 
         <SectionHeader title="Select date" className="pb-3" />
-        <DateStrip days={days} selected={draft.date.day} onSelect={draft.setDay} />
+        <DateStrip days={days} selected={draft.date.day} onSelect={selectDay} />
 
         <Div className="mt-6 gap-6 px-5">
+          {LIVE && live.pending && <Skeleton className="h-[140px] w-full" rounded={20} />}
+          {LIVE && !live.pending && groups.every((g) => g.slots.every((x) => x.state === 'booked')) && (
+            <NoResultsBody body={live.error ? errorMessage(live.error) : 'No collection slots left on this day. Try another day.'} />
+          )}
           {groups.map((g) => (
             <SlotGroup key={g.period} period={g.period} slots={g.slots} onSelect={draft.setTime} />
           ))}
@@ -660,6 +722,8 @@ export function DiagnosticConfirmScreen() {
   const lab = getLab(order.labId)
   const listed = order.listed ?? test.price
   const paid = order.listed ? order.amount : memberPrice(test.price, 'diagnostics')
+  const testName = order.testNames?.length ? order.testNames.join(', ') : test.name
+  const cash = order.paymentType === 'cash'
   return (
     <Screen background="bg-white" padBottom={false}>
       <Div className="flex-1 px-6 pb-[150px]">
@@ -682,15 +746,16 @@ export function DiagnosticConfirmScreen() {
               <FlaskConical className="h-[20px] w-[20px] text-brand-600" strokeWidth={2} />
             </Span>
             <Div className="min-w-0 flex-1">
-              <P className="truncate text-title-sm text-ink-900">{test.name}</P>
-              <P className="truncate text-body-sm text-ink-500">{test.parameters} parameters</P>
+              <P className="truncate text-title-sm text-ink-900">{testName}</P>
+              {test.parameters > 0 && <P className="truncate text-body-sm text-ink-500">{test.parameters} parameters</P>}
             </Div>
           </Div>
           <Div className="gap-0 p-4">
-            <KeyValue label="Lab" value={lab.name} />
+            <KeyValue label="Lab" value={order.labName ?? lab.name} />
             <KeyValue label="Collection" value={order.method} />
             <KeyValue label="Date" value={order.date} />
             <KeyValue label="Slot" value={order.slot} />
+            {order.collectionCode && <KeyValue label="Collection code" value={order.collectionCode} />}
             <Divider />
             <Div className="flex-row items-start justify-between gap-6 py-[7px]">
               <Span className="text-body text-ink-500">Address</Span>
@@ -700,9 +765,12 @@ export function DiagnosticConfirmScreen() {
             </Div>
             <Divider />
             <MemberDiscountLine amount={listed} area="diagnostics" />
-            <KeyValue label="Amount paid" value={rupee(paid)} strong />
+            <KeyValue label={cash ? (order.method === 'Lab Visit' ? 'Pay at the lab' : 'Pay at collection') : 'Amount paid'} value={rupee(paid)} strong />
           </Div>
         </Card>
+        {order.collectionCode && (
+          <P className="mt-3 text-center text-caption text-ink-400">Read the collection code out to the technician when they arrive.</P>
+        )}
 
         <Div className="mt-5 rounded-card bg-caution-50 p-4">
           <Div className="flex-row items-center gap-2.5">
@@ -739,20 +807,40 @@ export function DiagnosticTrackingScreen() {
   const [confirming, setConfirming] = React.useState(false)
   const orders = useOrders((s) => s.diagnostics)
   const now = useNow(5000)
-  const b = diagnosticOrderById(orders, nav.params.id)
+  const code: string | undefined = nav.params.id
+  React.useEffect(() => {
+    // Live: the server's stage, technician and history, reloaded while the screen is open.
+    if (!LIVE || !code) return
+    const reload = () => void loadLabBooking(code).then((o) => useOrders.getState().upsertDiagnostic(o)).catch(() => undefined)
+    reload()
+    const timer = setInterval(reload, 20_000)
+    return () => clearInterval(timer)
+  }, [code])
+  const b = diagnosticOrderById(orders, code)
   const test = getTest(b.testId)
   const lab = getLab(b.labId)
   const stage = currentStage(b, now)
   const finished = stage >= 4
   const cancelled = b.status === 'cancelled'
   const stateFor = (i: number) => stageState(i, stage, finished)
-  const initials = b.technician.name.split(' ').map((p) => p[0]).join('').toUpperCase()
-  /* Seeded previews show the banner regardless, as the blueprint does. */
-  const needsFastingReminder = !cancelled && !finished && (test.fasting !== 'Not required' || b.fixedStage !== undefined)
+  const tech = b.technician.name
+  const initials = tech.split(' ').filter(Boolean).map((p) => p[0]).join('').toUpperCase()
+  /* Seeded previews show the banner regardless, as the blueprint does. Live: only for tests that need fasting. */
+  const needsFastingReminder = !cancelled && !finished && (test.fasting !== 'Not required' || (!LIVE && b.fixedStage !== undefined))
+  const paidOnline = !LIVE || b.paymentType === 'online'
+  const canCancel = LIVE ? Boolean(b.canCancel) : !cancelled && !finished
+  const reportCode = b.reportCodes?.[0]
   const cancelBooking = async () => {
-    await useOrders.getState().cancelDiagnostic(b.id)
-    usePayments.getState().markRefunded(b.id)
-    showToast('Booking cancelled', 'success', 'Your refund is on its way')
+    try {
+      await useOrders.getState().cancelDiagnostic(b.id)
+    } catch (e) {
+      setConfirming(false)
+      showToast(errorMessage(e, 'We could not cancel this booking. Please try again.'), 'critical')
+      return
+    }
+    if (LIVE) void syncOne('payments').catch(() => undefined)
+    else usePayments.getState().markRefunded(b.id)
+    showToast('Booking cancelled', 'success', paidOnline ? 'Your refund is on its way' : undefined)
     nav.navigate('orders-home', { tab: 'orders' })
   }
   const steps: TimelineStep[] = [
@@ -760,9 +848,9 @@ export function DiagnosticTrackingScreen() {
     {
       title: DIAGNOSTIC_STAGES[1],
       time: b.stageTimes?.[1],
-      body: `${b.technician.name} will collect your sample`,
+      body: tech ? `${tech} will collect your sample` : b.method === 'Lab Visit' ? 'The lab collects your sample when you visit' : 'A technician will be assigned before your slot',
       state: stateFor(1),
-      meta: stage >= 1 && (
+      meta: stage >= 1 && Boolean(tech) && (
         <Div className="flex-row items-center gap-2.5 rounded-tile bg-white p-2.5 shadow-tile">
           <Span className="flex-col h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-brand-50 text-body-sm font-bold text-brand-700">
             {initials}
@@ -771,9 +859,12 @@ export function DiagnosticTrackingScreen() {
             <P className="truncate text-body-sm font-bold text-ink-900">{b.technician.name}</P>
             <P className="truncate text-caption text-ink-400">Phlebotomist · ID {b.technician.id}</P>
           </Div>
-          <IconButton size={34} tone="brand" label="Call technician" onClick={() => showToast(`Calling ${b.technician.name}`, 'info', b.technician.mobile)}>
-            <Phone className="h-[15px] w-[15px]" strokeWidth={2.3} />
-          </IconButton>
+          {/* Live: the technician's number isn't shared with patients. */}
+          {!LIVE && (
+            <IconButton size={34} tone="brand" label="Call technician" onClick={() => showToast(`Calling ${b.technician.name}`, 'info', b.technician.mobile)}>
+              <Phone className="h-[15px] w-[15px]" strokeWidth={2.3} />
+            </IconButton>
+          )}
         </Div>
       ),
     },
@@ -786,7 +877,7 @@ export function DiagnosticTrackingScreen() {
       state: stateFor(4),
       meta: (
         <Btn
-          onPress={() => nav.navigate(finished ? 'lab-report' : 'st-report-pending')}
+          onPress={() => nav.navigate(finished ? 'lab-report' : 'st-report-pending', finished && reportCode ? { params: { id: reportCode } } : undefined)}
           className="tap text-body-sm font-bold text-brand-600"
         >
           {finished ? 'View report →' : 'Check status →'}
@@ -809,7 +900,7 @@ export function DiagnosticTrackingScreen() {
               <P className="text-title-sm text-white">
                 {cancelled ? 'Booking cancelled' : `Collection on ${b.date}`}
               </P>
-              <P className="mt-0.5 text-body-sm text-white/65">{b.slot} · {b.technician.name}</P>
+              <P className="mt-0.5 text-body-sm text-white/65">{[b.slot, tech].filter(Boolean).join(' · ')}</P>
             </Div>
           </Div>
           <Div className="mt-3.5 flex-row items-center gap-1.5">
@@ -835,9 +926,10 @@ export function DiagnosticTrackingScreen() {
 
         <Card elevation="tile">
           <P className="mb-2.5 text-title-sm text-ink-900">Booking details</P>
-          <KeyValue label="Test" value={test.short} />
-          <KeyValue label="Lab" value={lab.name} />
-          <KeyValue label="Amount paid" value={rupee(b.amount)} />
+          <KeyValue label="Test" value={b.testNames?.length ? b.testNames.join(', ') : test.short} />
+          <KeyValue label="Lab" value={b.labName ?? lab.name} />
+          {b.collectionCode && !cancelled && !finished && <KeyValue label="Collection code" value={b.collectionCode} />}
+          <KeyValue label={paidOnline ? 'Amount paid' : 'Pay in cash'} value={rupee(b.amount)} />
           <Divider className="my-2.5" />
           <Div className="flex-row items-start gap-2.5">
             <MapPin className="mt-[2px] h-[15px] w-[15px] shrink-0 text-ink-400" strokeWidth={2.2} />
@@ -845,7 +937,7 @@ export function DiagnosticTrackingScreen() {
           </Div>
         </Card>
 
-        {!cancelled && !finished && (
+        {canCancel && (
           <Button variant="tertiary" className="!text-critical-600" onClick={() => setConfirming(true)}>
             Cancel booking
           </Button>
@@ -857,7 +949,11 @@ export function DiagnosticTrackingScreen() {
           tone="critical"
           icon={<AlertTriangle className="h-[26px] w-[26px]" strokeWidth={2} />}
           title="Cancel this collection?"
-          body={`${b.technician.name} is already assigned for ${b.date}. ${rupee(b.amount)} will be refunded to the original payment method within 3–5 working days.`}
+          body={
+            LIVE
+              ? `${tech ? `${tech} is assigned for ${b.date}. ` : ''}${paidOnline ? `${rupee(b.amount)} will be refunded to the original payment method within 3–5 working days.` : 'Nothing has been charged.'}`
+              : `${b.technician.name} is already assigned for ${b.date}. ${rupee(b.amount)} will be refunded to the original payment method within 3–5 working days.`
+          }
           actions={
             <>
               <Button variant="danger" onClick={cancelBooking}>
@@ -884,6 +980,138 @@ export function DiagnosticTrackingScreen() {
  * re-typesetting values the app cannot be certain it parsed correctly.
  */
 export function LabReportScreen() {
+  return LIVE ? <LiveLabReportScreen /> : <DemoLabReportScreen />
+}
+
+const FLAG_TONE = { normal: 'text-vital-700', borderline: 'text-caution-700', high: 'text-critical-600', low: 'text-critical-600' } as const
+
+/**
+ * Live: the report as the lab published it on KDC+: its results, the pathologist's summary and
+ * any doctor's review. The signed document itself can't be opened in the app yet (that needs an
+ * authenticated file viewer), so the files are listed, not shown.
+ */
+function LiveLabReportScreen() {
+  const nav = useNav()
+  const bookings = useOrders((s) => s.diagnostics)
+  const param: string = nav.params.id ?? ''
+  // Opened from an order: the booking's (first) report.
+  const code = bookings.find((b) => b.id === param)?.reportCodes?.[0] ?? param
+  const summary = useCatalog((s) => s.labReports.find((x) => x.id === code))
+  const detail = useReportDetails((s) => s.byCode[code])
+  const query = useQuery({ queryKey: ['lab-report', code], queryFn: () => loadReport(code), enabled: Boolean(code) })
+  const ready = (detail?.status ?? summary?.status) === 'ready'
+  const fileNote = () => showToast('Opening report files in the app is coming soon', 'info', 'Ask KDC+ support for a copy meanwhile')
+
+  return (
+    <Screen background="bg-canvas" padBottom={false}>
+      <ScreenHeader title="Lab report" subtitle={code} />
+
+      <Div className="flex-1 gap-3 px-5 pb-[130px] pt-4">
+        {!detail && query.isPending && <Skeleton className="h-[160px] w-full" rounded={20} />}
+        {!detail && query.isError && <NoResultsBody body={errorMessage(query.error, 'We could not load this report.')} />}
+        {detail && (
+          <>
+            <Card elevation="tile" padded={false}>
+              <Div className="flex-row items-start gap-3.5 p-4">
+                <Span className="flex-col h-[42px] w-[42px] shrink-0 items-center justify-center rounded-tile bg-brand-50">
+                  <FlaskConical className="h-[19px] w-[19px] text-brand-600" strokeWidth={2} />
+                </Span>
+                <Div className="min-w-0 flex-1">
+                  <P className="text-title-sm leading-[21px] text-ink-900">{detail.name}</P>
+                  <P className="mt-0.5 text-body-sm text-ink-500">{[detail.lab, detail.branch].filter(Boolean).join(' · ')}</P>
+                </Div>
+                <StatusBadge tone={ready ? 'success' : 'neutral'} dot={ready}>
+                  {ready ? 'Ready' : 'Processing'}
+                </StatusBadge>
+              </Div>
+              <Div className=" grid-cols-2 divide-x divide-ink-100 border-t border-ink-100">
+                <Div className="px-4 py-3">
+                  <P className="text-caption text-ink-400">Sample collected</P>
+                  <P className="mt-0.5 text-body-sm font-semibold text-ink-900">{detail.collectedAt ? `${atDay(detail.collectedAt)}` : '—'}</P>
+                </Div>
+                <Div className="px-4 py-3">
+                  <P className="text-caption text-ink-400">Reported</P>
+                  <P className="mt-0.5 text-body-sm font-semibold text-ink-900">{detail.reportedAt ? `${atDay(detail.reportedAt)}` : '—'}</P>
+                </Div>
+              </Div>
+            </Card>
+
+            {detail.results.length > 0 && (
+              <Card elevation="tile">
+                <P className="mb-2 text-title-sm text-ink-900">Results</P>
+                {detail.results.map((x, i) => (
+                  <Div key={`${x.name}-${i}`} className={`flex-row items-start gap-3 py-2 ${i ? 'border-t border-ink-100' : ''}`}>
+                    <Div className="min-w-0 flex-1">
+                      <P className="text-body-sm font-semibold text-ink-900">{x.name}</P>
+                      {x.range && <P className="text-caption text-ink-400">Range {x.range}</P>}
+                    </Div>
+                    <Div className="shrink-0 items-end">
+                      <P className={`text-body-sm font-bold ${FLAG_TONE[x.flag] ?? 'text-ink-900'}`}>
+                        {x.value} {x.unit ?? ''}
+                      </P>
+                      {x.flag !== 'normal' && <P className={`text-caption capitalize ${FLAG_TONE[x.flag]}`}>{x.flag}</P>}
+                    </Div>
+                  </Div>
+                ))}
+              </Card>
+            )}
+
+            {(detail.summary || detail.pathologist) && (
+              <Card elevation="tile">
+                {detail.summary && <P className="text-body-sm leading-[20px] text-ink-700">{detail.summary}</P>}
+                {detail.pathologist && <P className="mt-2 text-caption text-ink-400">Reported by {detail.pathologist}</P>}
+                {detail.nabl && <P className="text-caption text-ink-400">{detail.nabl}</P>}
+              </Card>
+            )}
+
+            {detail.reviews.map((rv) => (
+              <Banner
+                key={`${rv.doctor.code}-${rv.reviewedAt}`}
+                tone="brand"
+                icon={<ShieldCheck className="h-[16px] w-[16px]" strokeWidth={2.2} />}
+                title={`Reviewed by ${rv.doctor.name}`}
+                body={rv.note ?? ''}
+              />
+            ))}
+
+            {detail.files.length > 0 && (
+              <Div>
+                <SectionHeader title="Report document" className="!px-0 pb-2.5" />
+                <Card elevation="tile" padded={false} className="overflow-hidden">
+                  {detail.files.map((f, i, arr) => (
+                    <Btn
+                      key={f.fileId}
+                      onPress={fileNote}
+                      className={`tap flex-row w-full items-center gap-3.5 px-4 py-3.5 text-left ${i < arr.length - 1 ? 'border-b-[0.5px] border-ink-900/10' : ''}`}
+                    >
+                      <FileText className="h-[17px] w-[17px] text-critical-600" strokeWidth={2.1} />
+                      <Span className="min-w-0 flex-1 text-body-lg font-semibold text-ink-900">
+                        {f.primary ? 'Signed report' : 'Attachment'} · {f.pages} {f.pages === 1 ? 'page' : 'pages'}
+                      </Span>
+                    </Btn>
+                  ))}
+                </Card>
+                <P className="mt-2 text-caption text-ink-400">Viewing the lab’s signed document in the app is coming soon.</P>
+              </Div>
+            )}
+          </>
+        )}
+      </Div>
+
+      <StickyBar>
+        <Button onClick={() => nav.navigate('doctor-list', { tab: 'doctors' })}>Share with Doctor</Button>
+      </StickyBar>
+    </Screen>
+  )
+}
+
+/** "5 Oct 2026, 7:20 AM" (IST) for a server timestamp. */
+const atDay = (at: string) => {
+  const { date, time } = istParts(at)
+  return `${date.day} ${MONTH_NAMES[date.month].slice(0, 3)} ${date.year}, ${time}`
+}
+
+function DemoLabReportScreen() {
   const nav = useNav()
   const r = labReport
   const reports = useCatalog((s) => s.labReports)
@@ -1082,6 +1310,9 @@ const REPORT_FILTERS: ReportFilter[] = ['All', 'Blood tests', 'Imaging', 'Needs 
 export function LabReportsScreen() {
   const nav = useNav()
   const labReports = useCatalog((s) => s.labReports)
+  React.useEffect(() => {
+    if (LIVE) void syncOne('reports').catch(() => undefined)
+  }, [])
   const [text, setText] = React.useState('')
   const [filter, setFilter] = React.useState<ReportFilter>('All')
   const visible = searchReports(labReports, text, filter)
@@ -1196,7 +1427,7 @@ export function LabReportsScreen() {
                             )}
                           </>
                         ) : (
-                          <Span className="text-caption text-ink-400">Expected today, 7:00 PM</Span>
+                          <Span className="text-caption text-ink-400">{LIVE ? 'We’ll notify you when it’s ready' : 'Expected today, 7:00 PM'}</Span>
                         )}
                       </Div>
                     </Div>
@@ -1213,12 +1444,13 @@ export function LabReportsScreen() {
           </P>
         </Div>
 
-        <Btn
+        {/* Live: outside reports are added under Health records (documents), not here. */}
+        {!LIVE && <Btn
           onPress={() => nav.navigate('rx-upload')}
           className="tap mt-2.5 flex-row w-full items-center justify-center gap-2 rounded-tile border border-dashed border-ink-200 bg-white/60 py-3.5 text-body font-semibold text-brand-600"
         >
           Upload a report
-        </Btn>
+        </Btn>}
       </Div>
     </Screen>
   )

@@ -38,6 +38,7 @@ import { useBooking, useSelectedDoctor } from '../store/booking'
 import { useAppointments } from '../store/appointments'
 import { useCall } from '../store/call'
 import { useCheckout, runPayment } from '../flows/payment'
+import { LIVE } from '../services/config'
 import { finishConsultation } from '../flows/consultation'
 import { CancelAppointmentModal } from '../components/forms/AppointmentDialogs'
 import { MOCK_TODAY } from '../domain/schedule'
@@ -306,19 +307,39 @@ export function PaymentFailedScreen() {
   const showHold = !intent || consultation
   const holdTime = consultation?.time ?? '5:30 PM'
   const holdDoctor = consultation ? getDoctor(consultation.doctorId).name : d.name
+  const failure = useCheckout((s) => s.lastFailure)
+  const inflight = useCheckout((s) => s.inflight)
   const retry = () => (intent ? nav.navigate('st-payment-processing', { replace: true }) : nav.navigate('payment'))
   const changeMethod = () => (intent ? nav.back() : nav.navigate('payment'))
+  // Live: say what actually happened; the slot note only while the server still holds it.
+  const liveTitle = failure?.cancelled ? 'Payment cancelled' : failure?.pending ? 'Waiting for your bank' : 'Payment didn’t go through'
   return (
     <Screen background="bg-white" padBottom={false}>
       <ScreenHeader title="Payment" />
       <Div className=" flex-1 flex-col justify-center pb-[160px]">
         <StateBlock
-          tone="critical"
+          tone={LIVE && (failure?.cancelled || failure?.pending) ? 'neutral' : 'critical'}
           icon={<XCircle className="h-[32px] w-[32px]" strokeWidth={1.8} />}
-          title="Payment didn’t go through"
-          body="Your bank declined the transaction. No money has been deducted — if it shows as debited, it will be reversed within 48 hours."
+          title={LIVE ? liveTitle : 'Payment didn’t go through'}
+          body={
+            LIVE
+              ? failure?.reason ?? 'The payment didn’t go through. Nothing was charged.'
+              : 'Your bank declined the transaction. No money has been deducted — if it shows as debited, it will be reversed within 48 hours.'
+          }
         />
-        {showHold && (
+        {LIVE && inflight && consultation && !failure?.pending && (
+          <Div className="mt-7 px-6">
+            <Card elevation="tile" className="!bg-vital-50">
+              <Div className="flex-row items-center gap-2.5">
+                <Clock className="h-[16px] w-[16px] shrink-0 text-vital-700" strokeWidth={2.2} />
+                <P className="text-body-sm font-semibold text-vital-700">
+                  Your {holdTime} slot with {holdDoctor} is held for a few minutes while you retry.
+                </P>
+              </Div>
+            </Card>
+          </Div>
+        )}
+        {!LIVE && showHold && (
           <Div className="mt-7 px-6">
             <Card elevation="tile" className="!bg-vital-50">
               <Div className="flex-row items-center gap-2.5">
@@ -334,9 +355,9 @@ export function PaymentFailedScreen() {
 
       <StickyBar>
         <Div className="gap-2.5">
-          <Button onClick={retry}>Retry payment</Button>
+          <Button onClick={retry}>{LIVE && !inflight ? 'Try again' : 'Retry payment'}</Button>
           <Button variant="tertiary" onClick={changeMethod}>
-            Use a different method
+            {LIVE ? 'Go back' : 'Use a different method'}
           </Button>
         </Div>
       </StickyBar>
@@ -353,6 +374,7 @@ export function PaymentProcessingScreen() {
   const preview = useSelectedDoctor()
   const consultation = intent?.kind === 'consultation' ? intent : null
   const doctor = consultation ? getDoctor(consultation.doctorId) : preview
+  const inflight = useCheckout((s) => s.inflight)
 
   React.useEffect(() => {
     navigation.setOptions({ gestureEnabled: false })
@@ -373,7 +395,7 @@ export function PaymentProcessingScreen() {
         <Div className="mt-9 w-full rounded-card bg-ink-50 p-4">
           <Div className="flex-row items-center justify-between">
             <Span className="text-body-sm text-ink-500">Paying</Span>
-            <Span className="text-title-sm text-ink-900">{rupee(intent?.amount ?? 799)}</Span>
+            <Span className="text-title-sm text-ink-900">{rupee(inflight?.hold.amount ?? intent?.amount ?? (LIVE ? 0 : 799))}</Span>
           </Div>
           <Divider className="my-3" />
           <Div className="flex-row items-center gap-3">
@@ -385,14 +407,14 @@ export function PaymentProcessingScreen() {
             />
             <Div className="min-w-0 flex-1">
               <P className="truncate text-body-sm font-semibold text-ink-900">{intent?.title ?? doctor.name}</P>
-              <P className="truncate text-caption text-ink-400">{intent?.subtitle ?? 'Mon, 6 Oct · 5:30 PM'}</P>
+              <P className="truncate text-caption text-ink-400">{intent?.subtitle ?? (LIVE ? '' : 'Mon, 6 Oct · 5:30 PM')}</P>
             </Div>
           </Div>
         </Div>
 
         <Div className="mt-6 flex-row items-center gap-2 text-caption text-ink-400">
           <Span className="h-[6px] w-[6px] animate-pulse rounded-full bg-brand-600" />
-          Verifying with your bank
+          {LIVE ? 'Secured by Razorpay' : 'Verifying with your bank'}
         </Div>
       </Div>
     </Screen>
@@ -406,7 +428,8 @@ export function CancelledScreen() {
   const cancelled = useAppointments((s) => s.items.find((a) => a.id === s.lastCancelledId))
   const doctor = getDoctor(cancelled?.doctorId ?? useBooking.getState().doctorId)
   const when = cancelled ? cancelled.date.replace(/^(Today, |\w+, )/, '').replace(/ \d{4}$/, '') : '6 October'
-  const refund = cancelled ? cancelled.fee + cancelled.platformFee - cancelled.discount : 799
+  /* Live: the server's refund (a late cancellation keeps a fee). */
+  const refund = cancelled ? (cancelled.refundAmount ?? cancelled.fee + cancelled.platformFee - cancelled.discount) : 799
   return (
     <Screen background="bg-white" padBottom={false}>
       <ScreenHeader title="Appointment" />
@@ -419,12 +442,12 @@ export function CancelledScreen() {
         />
         <Div className="mt-7 gap-3 px-6">
           <Card elevation="tile">
-            <KeyValue label="Booking ID" value={cancelled?.bookingId ?? 'KDC2410A4821'} />
-            <KeyValue label="Cancelled on" value={cancelled?.cancelledOn ?? '5 Oct 2025, 4:12 PM'} />
+            <KeyValue label="Booking ID" value={cancelled?.bookingId ?? (LIVE ? '' : 'KDC2410A4821')} />
+            <KeyValue label="Cancelled on" value={cancelled?.cancelledOn ?? (LIVE ? '' : '5 Oct 2025, 4:12 PM')} />
             <Divider className="my-2.5" />
             <KeyValue label="Refund amount" value={rupee(refund)} strong tone="success" />
             <P className="mt-2 text-caption text-ink-400">
-              Credited to {cancelled?.paidVia ?? 'UPI · aarav@okhdfcbank'} within 3–5 working days.
+              Credited to {cancelled?.paidVia ?? (LIVE ? 'the original payment method' : 'UPI · aarav@okhdfcbank')} within 3–5 working days.
             </P>
           </Card>
         </Div>

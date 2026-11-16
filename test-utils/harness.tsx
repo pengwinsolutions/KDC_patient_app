@@ -37,7 +37,8 @@ export async function cleanup() {
 }
 
 export async function render(element: React.ReactElement) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+  /* gcTime Infinity: no garbage-collection timers left running after a test (live screen tests load real data). */
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } } })
   let renderer: ReactTestRenderer.ReactTestRenderer | undefined
   await ReactTestRenderer.act(async () => {
     renderer = ReactTestRenderer.create(<QueryClientProvider client={client}>{element}</QueryClientProvider>)

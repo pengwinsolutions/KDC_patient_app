@@ -36,6 +36,31 @@ import { showToast } from '../store/toast'
 import { pickPhoto } from '../flows/photo'
 import { familySchema, formatMobile, normalizeMobile, type FamilyForm } from '../validation/schemas'
 import type { FamilyMember, TimelineEvent } from '../types'
+import { useQuery } from '@tanstack/react-query'
+import { LIVE } from '../services/config'
+import { errorMessage } from '../services/errors'
+import { loadRecordCounts, loadTimeline } from '../services/live/records'
+
+const TL_ICON = { consultation: Video, followup: CalendarClock, prescription: FileText, report: FlaskConical, lab: FlaskConical, pharmacy: Pill } as const
+
+/** Live: where tapping a timeline event (or a recent record) leads; null when there's no screen for it. */
+function eventRoute(e: TimelineEvent): { screen: string; params: Record<string, unknown> } | null {
+  if (!e.ref) return null
+  switch (e.type) {
+    case 'consultation':
+    case 'followup':
+      return { screen: 'appointment-detail', params: { id: e.ref } }
+    case 'prescription':
+      return { screen: 'prescription', params: { rxId: e.ref } }
+    case 'report':
+      // Uploaded documents have numeric ids and no viewer yet; lab reports have codes.
+      return /^\d+$/.test(e.ref) ? null : { screen: 'lab-report', params: { id: e.ref } }
+    case 'lab':
+      return { screen: 'diagnostic-tracking', params: { id: e.ref } }
+    case 'pharmacy':
+      return { screen: 'order-tracking', params: { id: e.ref } }
+  }
+}
 
 /* ============================================= 44 — Medical records ======= */
 
@@ -61,9 +86,16 @@ function memberCounts(member: FamilyMember, primaryRecords: number) {
 export function RecordsScreen() {
   const nav = useNav()
   const members = useFamily((s) => s.members)
-  const [memberId, setMemberId] = React.useState(members[0].id)
-  const selected = members.find((m) => m.id === memberId) ?? members[0]
-  const scale = memberCounts(selected, members[0].records)
+  const [memberId, setMemberId] = React.useState(members[0]?.id ?? '')
+  const selected: FamilyMember | undefined = members.find((m) => m.id === memberId) ?? members[0]
+  const selectedId = selected?.id ?? ''
+  // Live: each member's counts and latest records come from the server.
+  const cachedCounts = useRecords((s) => s.counts[selectedId])
+  const counts = useQuery({ queryKey: ['record-counts', selectedId], queryFn: () => loadRecordCounts(selectedId), enabled: LIVE && Boolean(selectedId), initialData: cachedCounts })
+  const recent = useQuery({ queryKey: ['timeline-recent', selectedId], queryFn: () => loadTimeline(selectedId), enabled: LIVE && Boolean(selectedId) })
+  const recentEvents = (recent.data?.events ?? []).slice(0, 3)
+  const scale = LIVE || !selected ? (n: number) => n : memberCounts(selected, members[0].records)
+  const countOf = (key: (typeof CATEGORIES)[number]['key']) => (LIVE ? counts.data?.[key] ?? 0 : scale(recordCounts[key]))
   return (
     <Screen background="bg-canvas" padBottom={false}>
       <Div className="bg-white px-5 pb-4" style={{ marginTop: -DEVICE.safeTop, paddingTop: DEVICE.safeTop }}>
@@ -86,11 +118,11 @@ export function RecordsScreen() {
               key={m.id}
               onPress={() => setMemberId(m.id)}
               className={`tap flex-row shrink-0 items-center gap-2.5 rounded-chip py-2 pl-2 pr-3.5  ${
-                m.id === selected.id ? 'bg-brand-600' : 'bg-white ring-1 ring-inset  ring-ink-100'
+                m.id === selectedId ? 'bg-brand-600' : 'bg-white ring-1 ring-inset  ring-ink-100'
               }`}
             >
               <Avatar src={m.photo} name={m.name} size={28} radius={10} />
-              <Span className={`text-body-sm font-semibold ${m.id === selected.id ? 'text-white' : 'text-ink-700'}`}>
+              <Span className={`text-body-sm font-semibold ${m.id === selectedId ? 'text-white' : 'text-ink-700'}`}>
                 {m.relation === 'Self' ? 'You' : m.name.split(' ')[0]}
               </Span>
             </Btn>
@@ -109,7 +141,7 @@ export function RecordsScreen() {
                 <c.Icon className={`h-[19px] w-[19px] ${c.color}`} strokeWidth={2} />
               </Span>
               <P className="mt-3 text-title-sm text-ink-900">{c.label}</P>
-              <P className="mt-0.5 text-body-sm text-ink-400">{scale(recordCounts[c.key])} records</P>
+              <P className="mt-0.5 text-body-sm text-ink-400">{countOf(c.key)} records</P>
             </Btn>
           ))}
         </Div>
@@ -118,7 +150,33 @@ export function RecordsScreen() {
         <Div className="pt-6">
           <SectionHeader title="Recently added" action="Timeline" onAction={() => nav.navigate('health-timeline')} className="pb-3" />
           <Div className="gap-2.5 px-5">
-            {selected.primary ? RECENT_RECORDS.map((r) => (
+            {LIVE ? (
+              recentEvents.length ? (
+                recentEvents.map((e) => {
+                  const Icon = TL_ICON[e.type]
+                  const route = eventRoute(e)
+                  return (
+                    <Btn
+                      key={e.id}
+                      onPress={() => route && nav.navigate(route.screen, { params: route.params })}
+                      className="tap flex-row w-full items-center gap-3.5 rounded-card bg-white p-4 text-left shadow-tile"
+                    >
+                      <Span className="flex-col h-[40px] w-[40px] shrink-0 items-center justify-center rounded-tile bg-ink-50">
+                        <Icon className="h-[18px] w-[18px] text-ink-500" strokeWidth={2.1} />
+                      </Span>
+                      <Div className="min-w-0 flex-1">
+                        <P className="truncate text-body-lg font-semibold text-ink-900">{e.title}</P>
+                        <P className="truncate text-caption text-ink-400">
+                          {e.meta} · {e.date}
+                        </P>
+                      </Div>
+                    </Btn>
+                  )
+                })
+              ) : (
+                <StateBlock compact icon={<FolderOpen className="h-[26px] w-[26px]" strokeWidth={1.9} />} title="Nothing added recently" />
+              )
+            ) : selected?.primary ? RECENT_RECORDS.map((r) => (
               <Btn
                 key={r.title}
                 onPress={() => nav.navigate(r.screen)}
@@ -174,10 +232,29 @@ const TIMELINE_FILTERS = ['All events', 'Consultations', 'Prescriptions', 'Repor
 export function TimelineScreen() {
   const nav = useNav()
   const added = useRecords((s) => s.added)
+  const hasMore = useRecords((s) => s.added.length < s.total)
+  const [loadingMore, setLoadingMore] = React.useState(false)
   const [showEarlier, setShowEarlier] = React.useState(false)
   const [filter, setFilter] = React.useState('All events')
   const [oldestFirst, setOldestFirst] = React.useState(false)
-  const events = [...timelineEvents(added), ...(showEarlier ? EARLIER : [])]
+  const events = [...timelineEvents(added), ...(showEarlier && !LIVE ? EARLIER : [])]
+  const open = (h: TimelineEvent) => {
+    if (!LIVE) return nav.navigate(h.type === 'report' ? 'lab-report' : h.type === 'prescription' ? 'prescription' : 'appointment-detail')
+    const route = eventRoute(h)
+    if (route) nav.navigate(route.screen, { params: route.params })
+  }
+  const loadEarlier = async () => {
+    if (!LIVE) return setShowEarlier(true)
+    setLoadingMore(true)
+    try {
+      await useRecords.getState().loadMore()
+    } catch (e) {
+      showToast(errorMessage(e, 'Could not load earlier events.'), 'critical')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+  const reachedStart = LIVE ? !hasMore : showEarlier
   const months = groupByMonth(filterTimeline(events, filter))
   const grouped = oldestFirst ? [...months].reverse() : months
 
@@ -236,7 +313,7 @@ export function TimelineScreen() {
                         <m.Icon className={`h-[17px] w-[17px] ${m.color}`} strokeWidth={2.1} />
                       </Span>
                       <Btn
-                        onPress={() => nav.navigate(h.type === 'report' ? 'lab-report' : h.type === 'prescription' ? 'prescription' : 'appointment-detail')}
+                        onPress={() => open(h)}
                         className="tap min-w-0 flex-1 rounded-card bg-white p-3.5 text-left shadow-tile"
                       >
                         <Div className="flex-row items-start justify-between gap-3">
@@ -260,16 +337,19 @@ export function TimelineScreen() {
         ))}
 
         <Div className="px-5 pt-5">
-          {showEarlier ? (
+          {reachedStart ? (
+            LIVE && events.length === 0 ? null : (
             <P className="py-2 text-center text-caption text-ink-400">
               You have reached the start of your KDC+ record.
             </P>
+            )
           ) : (
             <Btn
-              onPress={() => setShowEarlier(true)}
+              onPress={loadEarlier}
+              disabled={loadingMore}
               className="tap flex-row w-full items-center justify-center gap-2 rounded-card border border-dashed border-ink-200 bg-white/60 py-3.5 text-body font-semibold text-brand-600"
             >
-              Load earlier events
+              {loadingMore ? 'Loading…' : 'Load earlier events'}
             </Btn>
           )}
         </Div>
@@ -305,7 +385,7 @@ export function FamilyScreen() {
                   {m.relation} · {m.age} yrs · {m.gender}
                 </P>
                 <Div className="mt-2 flex-row items-center gap-1.5">
-                  <MetaChip className="!bg-critical-50 !text-critical-700">{m.blood}</MetaChip>
+                  {m.blood ? <MetaChip className="!bg-critical-50 !text-critical-700">{m.blood}</MetaChip> : null}
                   <MetaChip>{m.records} records</MetaChip>
                 </Div>
               </Div>
@@ -362,19 +442,31 @@ export function AddFamilyScreen() {
       relation: form.relation,
       dob: form.dob,
       gender: form.gender,
-      blood: form.blood || 'Unknown',
+      blood: form.blood || (LIVE ? '' : 'Unknown'),
       photo,
       mobile: form.mobile.trim() ? formatMobile(form.mobile) : undefined,
     }
-    if (existing) await family.update(existing.id, member)
-    else await family.add(member)
+    try {
+      if (existing) await family.update(existing.id, member)
+      else await family.add(member)
+    } catch (e) {
+      showToast(errorMessage(e, 'Could not save the family member. Please try again.'), 'critical')
+      return
+    }
     showToast(existing ? 'Family member updated' : 'Family member added')
     nav.navigate('family', { replace: true })
   })
 
   const remove = async () => {
     if (!existing) return
-    await family.remove(existing.id)
+    try {
+      await family.remove(existing.id)
+    } catch (e) {
+      // e.g. the member still has upcoming appointments.
+      setConfirmingRemoval(false)
+      showToast(errorMessage(e, 'Could not remove the family member.'), 'critical')
+      return
+    }
     showToast('Family member removed')
     nav.navigate('family', { replace: true })
   }
@@ -387,7 +479,8 @@ export function AddFamilyScreen() {
         <Div className=" flex-col items-center">
           <Div className="relative">
             <Avatar src={photo} name={watch('name') || 'New Member'} size={84} radius={28} />
-            <IconButton
+            {/* Live: photos need authenticated image loading, not built yet. */}
+            {!LIVE && <IconButton
               size={30}
               tone="brand"
               label="Add photo"
@@ -395,9 +488,9 @@ export function AddFamilyScreen() {
               className="absolute -bottom-1 -right-1 ring-[3px] ring-white"
             >
               <Plus className="h-[15px] w-[15px]" strokeWidth={2.6} />
-            </IconButton>
+            </IconButton>}
           </Div>
-          <P className="mt-2.5 text-body-sm font-semibold text-brand-600">Add photo</P>
+          {!LIVE && <P className="mt-2.5 text-body-sm font-semibold text-brand-600">Add photo</P>}
         </Div>
 
         <Div className="mt-6 gap-4">

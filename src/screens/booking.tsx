@@ -37,7 +37,8 @@ import { useCatalog, getClinic, getDoctor, getLab, getTest } from '../store/cata
 import { useBooking, useSelectedDoctor } from '../store/booking'
 import { takenTimes, useAppointments } from '../store/appointments'
 import { patientLabel, useFamily } from '../store/family'
-import { NET_BANKING, WALLET, usePayments } from '../store/payments'
+import { NET_BANKING, PAY_AT_COLLECTION, PAY_ONLINE, WALLET, usePayments } from '../store/payments'
+import { LIVE as LIVE_PAYMENT } from '../services/config'
 import { PREVIEW_BILLED_TEST, useDiagnosticsDraft } from '../store/diagnosticsDraft'
 import { formatAddress, useAddresses } from '../store/addresses'
 import { showToast } from '../store/toast'
@@ -58,7 +59,29 @@ import {
   MOCK_TODAY,
   monthAt,
   toIso,
+  type CalendarDate,
+  type Period,
 } from '../domain/schedule'
+import { LIVE } from '../services/config'
+import { useEarliestSlots, useMonthAvailability, useSlots } from '../hooks/useCare'
+import { careRules, groupSlots } from '../services/live/doctors'
+import { selfMemberId } from '../services/live/me'
+import { errorMessage } from '../services/errors'
+import { useProfile } from '../store/profile'
+
+/** Live: the free-cancellation cut-off, from the server's rule (minutes before the start). */
+function freeCancelUntil(time: string): string {
+  if (!LIVE) return cancellationDeadline(time)
+  const [clock, meridiem] = time.split(' ')
+  const [h, m] = clock.split(':').map(Number)
+  const total = ((h % 12) + (meridiem === 'PM' ? 12 : 0)) * 60 + m - careRules.freeCancelMinutes
+  const wrapped = ((total % 1440) + 1440) % 1440
+  const hh = Math.floor(wrapped / 60)
+  return `${hh % 12 || 12}:${String(wrapped % 60).padStart(2, '0')} ${hh >= 12 ? 'PM' : 'AM'}`
+}
+
+/** The fee shown at each step: live uses the platform fee the server charges. */
+const platformFee = () => (LIVE ? careRules.platformFee : PLATFORM_FEE)
 
 /* --------------------------------------------------- Shared booking header */
 
@@ -125,7 +148,7 @@ export function ConsultTypeScreen() {
         <P className="mt-1 text-body text-ink-500">You can change this later, before you pay.</P>
 
         <Div className="mt-4 gap-3">
-          {consultationModes.map((m) => {
+          {consultationModes.filter((m) => !LIVE || (d.modes ?? []).includes(m.id)).map((m) => {
             const Icon = MODE_ICON[m.id]
             const selected = m.id === mode
             return (
@@ -206,13 +229,32 @@ export function DateScreen() {
     return clampMonthOffset(months)
   })
   const { year, month } = monthAt(monthOffset)
-  const view = buildMonth(year, month)
+  const demoView = buildMonth(year, month)
+  /* Live: the doctor's real bookable days for this month. */
+  const monthDays = useMonthAvailability(d.id, booking.mode, year, month).data
+  const view = LIVE
+    ? {
+        ...demoView,
+        days: demoView.days.map((x) => {
+          const day = monthDays?.days.find((a) => a.date.day === x.date)
+          return { ...x, available: Boolean(day && !day.closed && day.freeSlots > 0) }
+        }),
+      }
+    : demoView
   const onShownMonth = booking.date.year === year && booking.date.month === month
   const ModeIcon = MODE[booking.mode].Icon
-  const earliest = [
-    { d: 'Today, 5 Oct', t: '5:30 PM', tone: 'vital', date: MOCK_TODAY },
-    { d: 'Mon, 6 Oct', t: '10:00 AM', tone: 'ink', date: { ...MOCK_TODAY, day: 6 } },
-  ]
+  const liveEarliest = useEarliestSlots(d.id, booking.mode).data ?? []
+  const earliest: { d: string; t: string; tone: string; date: CalendarDate }[] = LIVE
+    ? liveEarliest.map((x, i) => ({
+        d: toIso(x.date) === toIso(MOCK_TODAY) ? `Today, ${formatShort(x.date).split(', ')[1]}` : formatShort(x.date),
+        t: x.time,
+        tone: i === 0 ? 'vital' : 'ink',
+        date: x.date,
+      }))
+    : [
+        { d: 'Today, 5 Oct', t: '5:30 PM', tone: 'vital', date: MOCK_TODAY },
+        { d: 'Mon, 6 Oct', t: '10:00 AM', tone: 'ink', date: { ...MOCK_TODAY, day: 6 } },
+      ]
 
   return (
     <Screen background="bg-canvas" padBottom={false}>
@@ -237,7 +279,7 @@ export function DateScreen() {
           onNext={() => setMonthOffset(clampMonthOffset(monthOffset + 1))}
         />
 
-        <Div className="mt-4">
+        {earliest.length > 0 && <Div className="mt-4">
           <SectionHeader title="Earliest available" className="!px-0 pb-2.5" />
           <Div className=" grid-cols-2 gap-2.5">
             {earliest.map((s) => (
@@ -254,7 +296,7 @@ export function DateScreen() {
               </Btn>
             ))}
           </Div>
-        </Div>
+        </Div>}
       </Div>
 
       <StickyBar>
@@ -278,13 +320,25 @@ export function SlotScreen() {
   const [confirmingMove, setConfirmingMove] = React.useState(false)
   const iso = toIso(booking.date)
   const taken = takenTimes(appointments, d.id, iso)
-  const groups = consultationSlots(d.id, booking.date, taken, booking.time)
-  const canContinue = isSlotOpen(d.id, booking.date, taken, booking.time)
+  /* Live: the doctor's real slots for that day. */
+  const liveSlots = useSlots(d.id, booking.mode, booking.date)
+  const groups = LIVE ? groupSlots(liveSlots.data ?? [], booking.time) : consultationSlots(d.id, booking.date, taken, booking.time)
+  const canContinue = LIVE
+    ? Boolean(booking.time && liveSlots.data?.some((x) => x.time === booking.time && x.available))
+    : isSlotOpen(d.id, booking.date, taken, booking.time)
   const rescheduling = booking.reschedulingId
+  const noSlots = LIVE && liveSlots.isSuccess && !liveSlots.data.some((x) => x.available)
 
   const moveAppointment = async () => {
     if (!rescheduling || !booking.time) return
-    await useAppointments.getState().reschedule(rescheduling, booking.date, booking.time)
+    try {
+      await useAppointments.getState().reschedule(rescheduling, booking.date, booking.time)
+    } catch (e) {
+      setConfirmingMove(false)
+      showToast(errorMessage(e, 'We could not reschedule. Please try again.'), 'critical')
+      void liveSlots.refetch()
+      return
+    }
     booking.finishReschedule()
     showToast('Appointment rescheduled', 'success', `${formatShort(booking.date)} · ${booking.time}`)
     nav.finishTo('appointment-detail', { id: rescheduling })
@@ -297,9 +351,19 @@ export function SlotScreen() {
       <Steps active={2} />
 
       <Div className="flex-1 gap-6 px-5 pb-[130px] pt-5">
-        <SlotGroup period="Morning" slots={groups.Morning} onSelect={booking.setTime} />
-        <SlotGroup period="Afternoon" slots={groups.Afternoon} onSelect={booking.setTime} />
-        <SlotGroup period="Evening" slots={groups.Evening} onSelect={booking.setTime} />
+        {(['Morning', 'Afternoon', 'Evening'] as Period[])
+          .filter((p) => !LIVE || groups[p].length > 0)
+          .map((p) => (
+            <SlotGroup key={p} period={p} slots={groups[p]} onSelect={booking.setTime} />
+          ))}
+        {noSlots && (
+          <Banner
+            tone="caution"
+            icon={<Info className="h-[16px] w-[16px]" strokeWidth={2.2} />}
+            title="No open slots on this day"
+            body="Pick another date to see the doctor's open times."
+          />
+        )}
 
         <Div className="flex-row items-center gap-4 rounded-tile bg-white p-3.5 shadow-tile">
           <Span className="flex-row items-center gap-1.5 text-caption text-ink-500">
@@ -403,10 +467,12 @@ function MapPreview({ height = 150 }: { height?: number }) {
 export function ClinicScreen() {
   const nav = useNav()
   const d = useSelectedDoctor()
-  const clinics = useCatalog((s) => s.clinics)
+  const demoClinics = useCatalog((s) => s.clinics)
   const selectedClinicId = useBooking((s) => s.clinicId)
   const setClinic = useBooking((s) => s.setClinic)
   const continueToDate = () => nav.navigate('select-date')
+  /* Live: a doctor practises at one clinic (their profile's address); distance and today's slots aren't known here. */
+  const clinics = LIVE ? [] : demoClinics
   return (
     <Screen background="bg-canvas" padBottom={false}>
       <ScreenHeader title="Choose clinic" border={false} />
@@ -415,9 +481,15 @@ export function ClinicScreen() {
       <Div className="flex-1 px-5 pb-[120px] pt-4">
         <Div className="mb-4 flex-row items-center gap-2 rounded-tile bg-ink-900 px-3.5 py-2.5">
           <Building2 className="h-[15px] w-[15px] shrink-0 text-white" strokeWidth={2.2} />
-          <P className="text-body-sm font-semibold text-white">In-person consultation · 20 min · {rupee(d.fees.clinic)}</P>
+          <P className="text-body-sm font-semibold text-white">In-person consultation · {consultMinutes('clinic')} min · {rupee(d.fees.clinic)}</P>
         </Div>
 
+        {LIVE && (
+          <Card elevation="card" className="ring-[1.5px] ring-inset ring-brand-600">
+            <P className="text-title-sm text-ink-900">{d.hospital || 'Clinic'}</P>
+            <P className="mt-1 text-body-sm leading-[18px] text-ink-500">{d.clinicAddress || `${d.locality}`}</P>
+          </Card>
+        )}
         <Div className="gap-3">
           {clinics.map((c) => {
             const selected = c.id === selectedClinicId
@@ -489,9 +561,13 @@ export function SummaryScreen() {
   const pricing = usePricing()
   const [pickingPatient, setPickingPatient] = React.useState(false)
   const fee = d.fees[booking.mode]
-  const platform = PLATFORM_FEE
+  const platform = platformFee()
   const { discount, total } = pricing.bill(fee, 'consultations', platform)
-  const patient = family.find((m) => m.id === booking.patientId) ?? family[0]
+  const holderName = useProfile((s) => s.profile.name)
+  /* Live: no choice yet means the account holder. */
+  const patientId = LIVE ? booking.patientId || String(selfMemberId ?? '') : booking.patientId
+  const patient = family.find((m) => m.id === patientId) ?? (LIVE ? family.find((m) => m.primary) : family[0])
+  const patientValue = patient ? (patient.primary ? `${patient.name} (Self)` : patientLabel(patient)) : `${holderName} (Self)`
   const ModeIcon = MODE[booking.mode].Icon
 
   return (
@@ -522,12 +598,12 @@ export function SummaryScreen() {
             />
             <SummaryRow icon={<Clock className="h-[15px] w-[15px]" />} label="Duration" value={`${consultMinutes(booking.mode)} minutes`} />
             {booking.mode === 'clinic' && (
-              <SummaryRow icon={<MapPin className="h-[15px] w-[15px]" />} label="Clinic" value={getClinic(booking.clinicId).name} />
+              <SummaryRow icon={<MapPin className="h-[15px] w-[15px]" />} label="Clinic" value={LIVE ? d.hospital || d.clinicAddress || '' : getClinic(booking.clinicId).name} />
             )}
             <SummaryRow
               icon={<ShieldCheck className="h-[15px] w-[15px]" />}
               label="Patient"
-              value={patient.primary ? `${patient.name} (Self)` : patientLabel(patient)}
+              value={patientValue}
               last
               onPress={() => setPickingPatient(true)}
             />
@@ -571,8 +647,12 @@ export function SummaryScreen() {
         <Banner
           tone="brand"
           icon={<Info className="h-[16px] w-[16px]" strokeWidth={2.2} />}
-          title={`Free cancellation until ${booking.time ? cancellationDeadline(booking.time) : ''}`}
-          body="Cancel up to one hour before the appointment for a full refund to the original payment method."
+          title={`Free cancellation until ${booking.time ? freeCancelUntil(booking.time) : ''}`}
+          body={
+            LIVE
+              ? `Cancel up to ${careRules.freeCancelMinutes} minutes before the appointment for a full refund to the original payment method.`
+              : 'Cancel up to one hour before the appointment for a full refund to the original payment method.'
+          }
         />
       </Div>
 
@@ -592,7 +672,7 @@ export function SummaryScreen() {
       <PatientPickerSheet
         visible={pickingPatient}
         members={family}
-        selectedId={booking.patientId}
+        selectedId={patientId}
         onSelect={booking.setPatient}
         onClose={() => setPickingPatient(false)}
       />
@@ -689,7 +769,7 @@ export function PaymentScreen() {
         showToast('Choose a time slot first', 'caution')
         return
       }
-      const patient = family.find((m) => m.id === booking.patientId) ?? family[0]
+      const patient = family.find((m) => m.id === booking.patientId) ?? (LIVE ? family.find((m) => m.primary) ?? family[0] : family[0])
       intent = {
         ...shared,
         kind: 'consultation',
@@ -699,12 +779,14 @@ export function PaymentScreen() {
         mode: booking.mode,
         date: booking.date,
         time: booking.time,
-        location: booking.mode === 'clinic' ? getClinic(booking.clinicId).name : undefined,
+        location: booking.mode === 'clinic' ? (LIVE ? d.hospital || d.clinicAddress || undefined : getClinic(booking.clinicId).name) : undefined,
         patientLabel: patientLabel(patient),
         bill,
         discountLabel: bill.discount ? `KDC+ Plus (${pricing.rateFor('consultations')}% off)` : undefined,
       }
     }
+    // Live: consultations are always paid now; a lab test may be paid at collection.
+    if (LIVE_PAYMENT && !diagnostics) selectMethod(PAY_ONLINE.id)
     useCheckout.getState().start(intent)
     nav.navigate('st-payment-processing')
   }
@@ -747,6 +829,27 @@ export function PaymentScreen() {
           </Div>
         </Card>
 
+        {/* Live: Razorpay Checkout offers UPI, cards, net banking and wallets itself; card details never reach KDC+. */}
+        {LIVE_PAYMENT && (
+          <Div>
+            <SectionHeader title="Pay using" className="!px-0 pb-2.5" />
+            <Div className="gap-2">
+              {(diagnostics ? [PAY_ONLINE, PAY_AT_COLLECTION] : [PAY_ONLINE]).map((p) => (
+                <PaymentMethodRow
+                  key={p.id}
+                  pm={p}
+                  selected={diagnostics ? p.id === selected || (p.id === PAY_ONLINE.id && selected !== PAY_AT_COLLECTION.id) : true}
+                  onClick={() => selectMethod(p.id)}
+                />
+              ))}
+            </Div>
+            <P className="mt-2 text-caption text-ink-400">
+              The amount is confirmed by KDC+ when you pay{diagnostics ? '' : ', and the slot is held for you while you do'}.
+            </P>
+          </Div>
+        )}
+
+        {!LIVE_PAYMENT && (<>
         <Div>
           <SectionHeader title="UPI" subtitle="Instant · recommended" className="!px-0 pb-2.5" />
           <Div className="gap-2">
@@ -831,20 +934,22 @@ export function PaymentScreen() {
           </Div>
         </Div>
 
+        </>)}
+
         <Div className="flex-row items-center justify-center gap-2 pt-1 text-caption text-ink-400">
           <ShieldCheck className="h-[13px] w-[13px] text-vital-600" strokeWidth={2.3} />
-          PCI-DSS compliant · KDC+ never stores your card details
+          {LIVE_PAYMENT ? 'Secured by Razorpay · KDC+ never sees your card details' : 'PCI-DSS compliant · KDC+ never stores your card details'}
         </Div>
       </Div>
 
       <StickyBar>
         <Button onClick={pay} icon={<Lock className="h-[16px] w-[16px]" strokeWidth={2.4} />}>
-          Pay {rupee(total)}
+          {LIVE_PAYMENT && diagnostics && selected === PAY_AT_COLLECTION.id ? 'Confirm booking' : `Pay ${rupee(total)}`}
         </Button>
       </StickyBar>
 
-      <UpiFormSheet visible={sheet === 'upi'} onClose={() => setSheet(null)} />
-      <CardFormSheet visible={sheet === 'card'} onClose={() => setSheet(null)} />
+      {!LIVE_PAYMENT && <UpiFormSheet visible={sheet === 'upi'} onClose={() => setSheet(null)} />}
+      {!LIVE_PAYMENT && <CardFormSheet visible={sheet === 'card'} onClose={() => setSheet(null)} />}
     </Screen>
   )
 }
@@ -860,7 +965,7 @@ export function SuccessScreen() {
   const year = lastBooked?.date.split(' ').pop() ?? String(booking.date.year)
   const dateLabel = lastBooked ? lastBooked.date.replace(/ \d{4}$/, '') : formatShort(booking.date)
   const time = lastBooked?.time ?? booking.time
-  const bookingId = lastBooked?.bookingId ?? 'KDC2410A4821'
+  const bookingId = lastBooked?.bookingId ?? (LIVE ? useAppointments.getState().lastBookedId ?? '' : 'KDC2410A4821')
   return (
     <Screen background="bg-white" padBottom={false}>
       <Div className=" flex-1 flex-col px-6 pb-[150px]">

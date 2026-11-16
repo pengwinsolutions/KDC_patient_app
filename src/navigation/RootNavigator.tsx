@@ -12,6 +12,17 @@ import { ALIASES, SCREENS } from './registry';
 import type { ScreenDef } from './types';
 import { devLaunch, MAIN, resetAction, routes, type TabId } from './navigation';
 import { initialRouteFor, useSession } from '../store/session';
+import { LIVE } from '../services/config';
+import { setSessionEndedHandler } from '../services/live/http';
+import { clearAll } from '../services/live/sync';
+// Live sync domains register themselves when loaded.
+import '../services/live/sync-account';
+import { clearPatientCatalog } from '../store/catalog';
+import { purgeLegacyData } from '../store/storage';
+import { showToast } from '../store/toast';
+
+// Live: nothing a demo build stored about a patient survives on the phone.
+purgeLegacyData();
 
 const TAB_OF_SCREEN: Record<string, TabId> = {
   home: 'home',
@@ -95,8 +106,23 @@ function openDevLaunchScreen() {
   }
 }
 
+/** Live: a session that can't be refreshed (signed out elsewhere, expired) clears the phone and returns to sign-in. */
+function useSessionEnded() {
+  useEffect(() => {
+    if (!LIVE) return;
+    setSessionEndedHandler(() => {
+      clearAll();
+      clearPatientCatalog();
+      useSession.getState().clear();
+      showToast('Your session has ended. Please sign in again.', 'critical');
+      if (navigationRef.isReady()) navigationRef.dispatch(resetAction('login'));
+    });
+  }, []);
+}
+
 export function RootNavigator() {
   useDevDeepLink();
+  useSessionEnded();
   /* Read once: later session changes navigate explicitly. */
   const [initialRoute] = useState(() => initialRouteFor(useSession.getState()));
   return (

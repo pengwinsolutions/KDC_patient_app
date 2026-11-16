@@ -3,28 +3,52 @@ import { persist } from 'zustand/middleware'
 import type { TimelineEvent } from '../types'
 import { healthTimeline } from '../mock-data/mock'
 import { persistStorage } from './storage'
+import { LIVE } from '../services/config'
+import { loadTimeline, type RecordCounts } from '../services/live/records'
 
 interface RecordsState {
+  /** Demo: events the app added on top of the blueprint's. Live: the server's timeline, newest first. */
   added: TimelineEvent[]
+  /** Live: the timeline's member, how many events it has in all, and the pages loaded. */
+  memberId: string
+  total: number
+  page: number
+  /** Live: the records screen's counts, per member id. */
+  counts: Record<string, RecordCounts>
   addEvent: (event: Omit<TimelineEvent, 'id'>) => void
+  setTimeline: (memberId: string, events: TimelineEvent[], total: number) => void
+  /** Live: the next page of the timeline. */
+  loadMore: () => Promise<void>
+  setCounts: (memberId: string, counts: RecordCounts) => void
   reset: () => void
 }
+
+const empty = { added: [] as TimelineEvent[], memberId: '', total: 0, page: 1, counts: {} as Record<string, RecordCounts> }
 
 let serial = 0
 
 export const useRecords = create<RecordsState>()(
   persist(
-    (set) => ({
-      added: [],
+    (set, get) => ({
+      ...empty,
       addEvent: (event) =>
         set((s) => ({ added: [{ ...event, id: `ev${Date.now().toString(36)}${serial++}` }, ...s.added] })),
-      reset: () => set({ added: [] }),
+      setTimeline: (memberId, added, total) => set({ memberId, added, total, page: 1 }),
+      loadMore: async () => {
+        const { memberId, page, added } = get()
+        if (!LIVE || !memberId) return
+        const next = await loadTimeline(memberId, page + 1)
+        const seen = new Set(added.map((e) => e.id))
+        set({ added: [...added, ...next.events.filter((e) => !seen.has(e.id))], total: next.total, page: page + 1 })
+      },
+      setCounts: (memberId, counts) => set((s) => ({ counts: { ...s.counts, [memberId]: counts } })),
+      reset: () => set(empty),
     }),
-    { name: 'records', storage: persistStorage },
+    { name: 'records', storage: persistStorage, partialize: (s) => ({ added: s.added }) },
   ),
 )
 
-export const timelineEvents = (added: TimelineEvent[]) => [...added, ...healthTimeline]
+export const timelineEvents = (added: TimelineEvent[]) => (LIVE ? added : [...added, ...healthTimeline])
 
 const TIMELINE_FILTERS: Record<string, TimelineEvent['type'][]> = {
   Consultations: ['consultation', 'followup'],

@@ -8,8 +8,13 @@ export const GST_RATE = 0.18
  * Rate for an area: the discount of the plan the patient actually holds, capped
  * by the per-stream ceiling operations set, and nothing unless the plan is active.
  */
-export function rateFor(membership: Pick<MembershipRecord, 'status' | 'planId'>, area: BenefitArea): number {
+export function rateFor(
+  membership: Pick<MembershipRecord, 'status' | 'planId'> & { rates?: Partial<Record<BenefitArea, number>> | null },
+  area: BenefitArea,
+): number {
   if (membership.status !== 'active') return 0
+  // Live: the server's own rates for this membership, which its bills use.
+  if (membership.rates) return membership.rates[area] ?? 0
   return Math.min(planById(membership.planId).discount, planConfig.discount[area])
 }
 
@@ -41,6 +46,7 @@ export function buildBill(base: number, pct: number, platformFee = 0): Bill {
 }
 
 export function planTotals(plan: Plan) {
+  if (plan.gst !== undefined && plan.total !== undefined) return { price: plan.price, gst: plan.gst, total: plan.total }
   const gst = Math.round(plan.price * GST_RATE)
   return { price: plan.price, gst, total: plan.price + gst }
 }

@@ -1,8 +1,10 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { LIVE } from '../services/config'
 import { persistStorage } from './storage'
 
 interface SessionData {
+  /** Live: the access token, in memory only (the refresh token is in the Keychain). */
   token: string | null
   mobile: string | null
   /** Set while the patient is on the OTP step. */
@@ -37,12 +39,17 @@ export const useSession = create<SessionState>()(
       markOnboarded: () => set({ onboarded: true }),
       clear: () => set(signedOut),
     }),
-    { name: 'session', storage: persistStorage },
+    {
+      name: 'session',
+      storage: persistStorage,
+      // Live: the session itself is never on disk; whether the profile is complete comes from the server.
+      partialize: (s) => (LIVE ? { onboarded: s.onboarded } : s),
+    },
   ),
 )
 
-/** Where a cold start should land for this session. */
+/** Where a cold start should land for this session. Live builds always start at the splash, which restores the session. */
 export function initialRouteFor(session: Pick<SessionData, 'token' | 'profileComplete'>): 'main' | 'profile-setup' | 'splash' {
-  if (!session.token) return 'splash'
+  if (LIVE || !session.token) return 'splash'
   return session.profileComplete ? 'main' : 'profile-setup'
 }

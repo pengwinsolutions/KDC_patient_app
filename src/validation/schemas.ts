@@ -98,3 +98,19 @@ export const medicalSchema = z.object({
   emergencyMobile: requiredMobile,
 })
 export type MedicalForm = z.infer<typeof medicalSchema>
+
+/**
+ * Live: a new patient's record starts empty, so every part is optional; what is entered
+ * must be valid, and an emergency contact needs a name and a mobile number together.
+ */
+export const medicalSchemaLive = z
+  .object({
+    bloodGroup: z.string(),
+    height: z.union([z.literal(''), z.string().trim().regex(/^\d{2,3}(\.\d)?\s*(cm)?$/i, 'Enter height in cm')]),
+    weight: z.union([z.literal(''), z.string().trim().regex(/^\d{1,3}(\.\d)?\s*(kg)?$/i, 'Enter weight in kg')]),
+    emergencyName: z.union([z.literal(''), personName]),
+    emergencyRelation: z.string().trim(),
+    emergencyMobile: optionalMobile,
+  })
+  .refine((f) => !f.emergencyName.trim() || f.emergencyMobile.trim(), { path: ['emergencyMobile'], message: 'Enter the contact’s mobile number' })
+  .refine((f) => !f.emergencyMobile.trim() || f.emergencyName.trim(), { path: ['emergencyName'], message: 'Enter the contact’s name' })

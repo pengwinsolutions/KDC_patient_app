@@ -25,6 +25,31 @@ import { getDoctor } from '../store/catalog'
 import { showToast } from '../store/toast'
 import { cancellationDeadline, consultMinutes } from '../domain/schedule'
 import type { Appointment } from '../types'
+import { LIVE } from '../services/config'
+import { careRules } from '../services/live/doctors'
+import { useCall } from '../store/call'
+
+/** Live: the payment line the server reports for this appointment. */
+const PAYMENT_LABEL: Record<string, { label: string; tone: 'success' | 'caution' | 'neutral' }> = {
+  paid: { label: 'Paid', tone: 'success' },
+  refunded: { label: 'Refunded', tone: 'success' },
+  partially_refunded: { label: 'Partly refunded', tone: 'success' },
+  waived: { label: 'Free follow-up', tone: 'success' },
+  unpaid: { label: 'Unpaid', tone: 'caution' },
+}
+
+function minutesUntil(a: Appointment): number | null {
+  if (!a.startsAt) return null
+  return Math.round((new Date(a.startsAt).getTime() - Date.now()) / 60_000)
+}
+
+/** Live: "6:30 PM" minus the server's free-cancellation window. */
+function freeCancelUntil(a: Appointment): string {
+  if (!LIVE || !a.startsAt) return cancellationDeadline(a.time)
+  const d = new Date(new Date(a.startsAt).getTime() - careRules.freeCancelMinutes * 60_000 + 5.5 * 3_600_000)
+  const h = d.getUTCHours()
+  return `${h % 12 || 12}:${String(d.getUTCMinutes()).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`
+}
 
 /* ============================================= 20 — Appointment list ====== */
 
@@ -130,7 +155,11 @@ export function AppointmentListScreen() {
 function statusHeadline(a: Appointment): string {
   if (a.status === 'cancelled') return 'Appointment cancelled'
   if (a.status === 'completed') return 'Consultation completed'
-  return a.id === 'a1' ? 'Starting in 28 minutes' : 'Scheduled'
+  if (!LIVE) return a.id === 'a1' ? 'Starting in 28 minutes' : 'Scheduled'
+  if (a.status === 'in-progress') return 'In progress'
+  if (a.lateMinutes) return `The doctor is running ${a.lateMinutes} minutes late`
+  const mins = minutesUntil(a)
+  return mins !== null && mins > 0 && mins <= 120 ? `Starting in ${mins} minute${mins === 1 ? '' : 's'}` : 'Scheduled'
 }
 
 export function AppointmentDetailScreen() {
@@ -141,6 +170,13 @@ export function AppointmentDetailScreen() {
   const { Icon, verb } = MODE[a.mode]
   const total = a.fee + a.platformFee - a.discount
   const upcoming = isUpcoming(a)
+  const payment = LIVE ? PAYMENT_LABEL[a.paymentStatus ?? ''] ?? { label: 'Paid', tone: 'success' as const } : null
+  const canReschedule = LIVE ? Boolean(a.canReschedule) : upcoming
+  const canCancel = LIVE ? Boolean(a.canCancel) : upcoming
+  const rate = () => {
+    useCall.getState().beginWaiting(a.id)
+    nav.navigate('consult-complete')
+  }
   const [confirmingCancel, setConfirmingCancel] = React.useState(false)
   const selectDoctor = useBooking((s) => s.selectDoctor)
   const startReschedule = useBooking((s) => s.startReschedule)
@@ -242,7 +278,11 @@ export function AppointmentDetailScreen() {
         <Card elevation="tile">
           <Div className="mb-2 flex-row items-center justify-between">
             <P className="text-title-sm text-ink-900">Payment</P>
-            <StatusBadge tone="success">{a.status === 'cancelled' ? 'Refunded' : 'Paid'}</StatusBadge>
+            {payment ? (
+              <StatusBadge tone={payment.tone}>{payment.label}</StatusBadge>
+            ) : (
+              <StatusBadge tone="success">{a.status === 'cancelled' ? 'Refunded' : 'Paid'}</StatusBadge>
+            )}
           </Div>
           <KeyValue label="Consultation fee" value={rupee(a.fee)} />
           <KeyValue label="Platform fee" value={rupee(a.platformFee)} />
@@ -251,39 +291,56 @@ export function AppointmentDetailScreen() {
           )}
           <Divider className="my-2.5" />
           <KeyValue label="Total paid" value={rupee(total)} strong />
-          <P className="mt-2 text-caption text-ink-400">{a.paidVia}</P>
-          <Btn
-            onPress={() => showToast('Invoice saved to Files', 'success', `${a.bookingId}.pdf`)}
-            className="tap mt-3 flex-row items-center gap-2 text-body-sm font-semibold text-brand-600"
-          >
-            <Receipt className="h-[15px] w-[15px]" strokeWidth={2.2} /> Download invoice
-          </Btn>
+          {LIVE && a.refundAmount !== undefined && a.status === 'cancelled' && (
+            <KeyValue label="Refunded" value={rupee(a.refundAmount)} tone="success" />
+          )}
+          {LIVE && a.lateFee ? <KeyValue label="Late-cancellation fee" value={rupee(a.lateFee)} /> : null}
+          {a.paidVia ? <P className="mt-2 text-caption text-ink-400">{a.paidVia}</P> : null}
+          {/* Live: invoices need a file viewer, which the app doesn't have yet. */}
+          {!LIVE && (
+            <Btn
+              onPress={() => showToast('Invoice saved to Files', 'success', `${a.bookingId}.pdf`)}
+              className="tap mt-3 flex-row items-center gap-2 text-body-sm font-semibold text-brand-600"
+            >
+              <Receipt className="h-[15px] w-[15px]" strokeWidth={2.2} /> Download invoice
+            </Btn>
+          )}
         </Card>
 
-        {upcoming && (
+        {canCancel && (
           <Banner
             tone="caution"
             icon={<AlertTriangle className="h-[16px] w-[16px]" strokeWidth={2.2} />}
-            title={`Free cancellation until ${cancellationDeadline(a.time)}`}
-            body="Cancelling after this time is charged at 50% of the consultation fee."
+            title={`Free cancellation until ${freeCancelUntil(a)}`}
+            body={`Cancelling after this time is charged at ${LIVE ? careRules.lateCancelFeePercent : 50}% of the consultation fee.`}
           />
         )}
 
         {/* Secondary actions */}
-        {upcoming && (
+        {(canReschedule || canCancel) && (
           <Div className=" grid-cols-2 gap-2.5">
-            <Button variant="tertiary" onClick={reschedule} icon={<CalendarClock className="h-[16px] w-[16px]" strokeWidth={2.2} />}>
-              Reschedule
-            </Button>
-            <Button
-              variant="tertiary"
-              className="!text-critical-600"
-              onClick={() => setConfirmingCancel(true)}
-              icon={<XCircle className="h-[16px] w-[16px]" strokeWidth={2.2} />}
-            >
-              Cancel
-            </Button>
+            {canReschedule && (
+              <Button variant="tertiary" onClick={reschedule} icon={<CalendarClock className="h-[16px] w-[16px]" strokeWidth={2.2} />}>
+                Reschedule
+              </Button>
+            )}
+            {canCancel && (
+              <Button
+                variant="tertiary"
+                className="!text-critical-600"
+                onClick={() => setConfirmingCancel(true)}
+                icon={<XCircle className="h-[16px] w-[16px]" strokeWidth={2.2} />}
+              >
+                Cancel
+              </Button>
+            )}
           </Div>
+        )}
+
+        {LIVE && a.status === 'completed' && a.canGiveFeedback && (
+          <Button variant="tertiary" onClick={rate}>
+            Rate this consultation
+          </Button>
         )}
       </Div>
 
@@ -303,11 +360,21 @@ export function AppointmentDetailScreen() {
       )}
       {!upcoming && (
         <StickyBar>
-          <Button
-            onClick={() => (a.status === 'completed' ? nav.navigate('prescription') : openDoctor())}
-          >
-            {a.status === 'completed' ? 'View Prescription' : 'Book again'}
-          </Button>
+          {LIVE ? (
+            <Button
+              onClick={() =>
+                a.prescriptionCode ? nav.navigate('prescription', { params: { rxId: a.prescriptionCode } }) : openDoctor()
+              }
+            >
+              {a.prescriptionCode ? 'View Prescription' : 'Book again'}
+            </Button>
+          ) : (
+            <Button
+              onClick={() => (a.status === 'completed' ? nav.navigate('prescription') : openDoctor())}
+            >
+              {a.status === 'completed' ? 'View Prescription' : 'Book again'}
+            </Button>
+          )}
         </StickyBar>
       )}
 

@@ -8,6 +8,8 @@ export type Gender = 'Male' | 'Female' | 'Other'
 
 export interface Profile {
   id: string
+  /** Live: the patient code (KDC-P-…) shown on the profile. */
+  code?: string
   name: string
   firstName: string
   mobile: string
@@ -84,6 +86,15 @@ export interface Doctor extends DoctorDetail {
   about: string
   consults: number
   recommendPct: number
+  /** Live: the consultation types offered (a mode not offered has fee 0). */
+  modes?: ConsultMode[]
+  /** Live: the registering medical council. */
+  council?: string
+  /** Live: the doctor's clinic, for in-person visits. */
+  clinicAddress?: string
+  onLeave?: boolean
+  /** Live: the directory's specialty slug. */
+  specialtySlug?: string
 }
 
 export interface Review {
@@ -140,6 +151,17 @@ export interface Appointment {
   reason?: string
   cancelledOn?: string
   feedback?: AppointmentFeedback
+  /** Live: what the server allows now, and the linked records. */
+  memberId?: string
+  startsAt?: string
+  paymentStatus?: string
+  refundAmount?: number
+  lateFee?: number
+  lateMinutes?: number
+  canCancel?: boolean
+  canReschedule?: boolean
+  canGiveFeedback?: boolean
+  prescriptionCode?: string
 }
 
 /* ------------------------------------------------------------ Prescription */
@@ -151,6 +173,8 @@ export interface PrescribedMedicine {
   frequency: string
   duration: string
   note: string
+  /** Live: the pharmacy catalogue entry the doctor picked, if any. */
+  medicineId?: number
 }
 
 export interface PrescriptionDoc {
@@ -175,6 +199,9 @@ export interface PrescriptionSummary {
   items: number
   status: 'active' | 'completed'
   rxId: string
+  /** Live: the consultation it was issued in, and the medicine names (for search). */
+  appointmentId?: string
+  medicineNames?: string[]
 }
 
 /* ---------------------------------------------------------------- Pharmacy */
@@ -212,7 +239,7 @@ export interface CartLine {
 }
 
 export type CartPrescription =
-  | { source: 'kdc'; label: string }
+  | { source: 'kdc'; label: string; /** Live: the KDC+ prescription's code. */ code?: string }
   | { source: 'upload'; label: string; uploadId: string }
 
 export interface PharmacyOrder {
@@ -223,13 +250,20 @@ export interface PharmacyOrder {
   placed: string
   eta: string
   etaWhen: string
-  lines: { medicineId: string; qty: number }[]
+  /** Live lines carry the name and price charged, since the medicine may not be in the loaded catalogue. */
+  lines: { medicineId: string; qty: number; name?: string; price?: number }[]
   amount: number
   /** The blueprint quotes this figure on the tracking screen only. */
   trackedTotal?: number
   address: string
   partner: string
   rider: { name: string; mobile: string }
+  /** Live: the server's status label ("Packed at pharmacy"), and whether it was cancelled or returned. */
+  statusLabel?: string
+  cancelled?: boolean
+  rxRequired?: boolean
+  /** Live: what's still owed (an online order whose payment hasn't completed). */
+  paymentRequired?: boolean
   fixedStage?: number
   stageTimes?: string[]
   payment: string
@@ -275,6 +309,9 @@ export interface Lab {
   slots: number
   photo: string
   locality: string
+  /** Live: this lab's price for each test code loaded so far (GET /public/labs?tests=). */
+  testPrices?: Record<string, number>
+  reportHours?: number
 }
 
 export type CollectionMethod = 'Home Collection' | 'Lab Visit'
@@ -291,6 +328,19 @@ export interface DiagnosticOrder {
   slotCompact: string
   address: string
   technician: { name: string; id: string; mobile: string }
+  /** Live: the booking's tests and lab, as booked (the catalogue may not have them loaded). */
+  title?: string
+  testNames?: string[]
+  labName?: string
+  statusLabel?: string
+  canCancel?: boolean
+  /** Live: the code the patient reads out to the technician at the door. */
+  collectionCode?: string
+  /** Live: the lab report codes for this booking, once issued. */
+  reportCodes?: string[]
+  /** Live: paid online, or in cash to the technician / at the lab. */
+  paymentType?: 'online' | 'cash'
+  paymentRequired?: boolean
   amount: number
   /** Price before the member rate, present once an order is actually billed. */
   listed?: number
@@ -323,6 +373,8 @@ export interface TimelineEvent {
   meta: string
   date: string
   time: string
+  /** Live: the code of what it's about (appointment, prescription, report, order, lab booking). */
+  ref?: string
 }
 
 export interface UploadedDocument {
@@ -333,13 +385,18 @@ export interface UploadedDocument {
   kind: 'image' | 'pdf'
   progress: number
   status: 'uploading' | 'done' | 'failed'
+  /** Live: the uploaded file's id on the server (sent with the order as a prescription). */
+  fileId?: number
 }
 
 /* ---------------------------------------------------------------- Payments */
 
 export interface PaymentMethod {
   id: string
-  kind: 'upi' | 'card' | 'netbanking' | 'wallet' | 'cod'
+  /** `online`: live builds, Razorpay Checkout (the patient picks UPI, card, net banking or a wallet there). */
+  kind: 'upi' | 'card' | 'netbanking' | 'wallet' | 'cod' | 'online'
+  /** Live: the server's default saved method. */
+  isDefault?: boolean
   label: string
   sub: string
   brand: string
@@ -354,6 +411,9 @@ export interface PaymentRecord {
   status: 'paid' | 'refunded' | 'failed'
   method: string
   ref: string
+  /** Live: partly refunded amounts and the invoice for the payment. */
+  refundedAmount?: number
+  invoiceNumber?: string | null
 }
 
 /* -------------------------------------------------------------- Membership */
@@ -367,6 +427,9 @@ export interface Plan {
   discount: number
   tag?: string
   best?: boolean
+  /** Live: the server's GST and total for the plan. */
+  gst?: number
+  total?: number
 }
 
 export interface SavingsEntry {
@@ -400,13 +463,15 @@ export type NotificationCategory =
 
 export interface NotificationItem {
   id: string
-  group: 'Today' | 'Yesterday' | 'This week'
+  group: 'Today' | 'Yesterday' | 'This week' | 'Earlier'
   category: NotificationCategory
   title: string
   body: string
   time: string
   unread: boolean
   action?: string
+  /** Live: what it opens (the server's `data`): a booking, order, report… by its code. */
+  target?: { type: string; code: string | null }
 }
 
 export interface HelpTopic {

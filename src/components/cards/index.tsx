@@ -443,12 +443,15 @@ export function LabCard({
             <Rating value={lab.rating} count={lab.reviews} size={12} />
           </Div>
           <P className="mt-[3px] flex-row items-center gap-1 text-caption text-ink-400">
-            <MapPin className="h-[11px] w-[11px]" /> {lab.locality} · {lab.distanceKm} km
+            <MapPin className="h-[11px] w-[11px]" /> {lab.locality}{lab.distanceKm ? ` · ${lab.distanceKm} km` : ''}
           </P>
         </Div>
         <Div className="shrink-0 text-right">
           <P className="text-title-sm text-ink-900">{rupee(price ?? lab.price)}</P>
-          <P className="mt-0.5 text-caption font-semibold text-vital-600">{lab.slots} slots</P>
+          {/* Live labs carry their report time instead of a slot count (slots are shared across labs). */}
+          <P className="mt-0.5 text-caption font-semibold text-vital-600">
+            {lab.testPrices && lab.reportHours ? `Report in ${lab.reportHours} h` : `${lab.slots} slots`}
+          </P>
         </Div>
       </Div>
       {lab.homeCollection && (

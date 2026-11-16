@@ -34,7 +34,7 @@ import {
 import { Screen, DEVICE } from '../components/ui/Screen'
 import { ScreenHeader, LargeHeader, BottomNav, HScroll } from '../components/ui/Nav'
 import { Button, IconButton, StickyBar } from '../components/ui/Button'
-import { RadioRow, SearchInput, Toggle } from '../components/ui/Inputs'
+import { Field, OtpInput, RadioRow, SearchInput, TextArea, Toggle } from '../components/ui/Inputs'
 import {
   Avatar,
   Card,
@@ -66,6 +66,15 @@ import { upcomingOf, useAppointments } from '../store/appointments'
 import { showToast } from '../store/toast'
 import { logout } from '../store/reset'
 import { useHelpSearch } from '../hooks/queries'
+import { useQuery } from '@tanstack/react-query'
+import { LIVE } from '../services/config'
+import { errorMessage } from '../services/errors'
+import { notificationRoute } from '../services/live/notifications'
+import { deleteAccount, requestDeletionCode } from '../services/live/account'
+import { loadRecordCounts } from '../services/live/records'
+import { createTicket, loadTicketCategories } from '../services/live/support'
+import { api } from '../services/live/http'
+import { useRecords } from '../store/records'
 import { orderPrescription } from '../flows/prescriptions'
 import { pickPhoto } from '../flows/photo'
 
@@ -83,10 +92,15 @@ export function NotificationsScreen() {
   const feed = notificationFeed(added, readIds)
   const allRead = feed.every((n) => !n.unread)
   const visible = feed.filter((n) => filter === 'All' || n.category === filter)
-  const groups = ['Today', 'Yesterday', 'This week']
+  const groups = LIVE ? ['Today', 'Yesterday', 'This week', 'Earlier'] : ['Today', 'Yesterday', 'This week']
 
   const act = (n: NotificationItem) => {
     markRead(n.id)
+    if (LIVE) {
+      const route = notificationRoute(n)
+      if (route) nav.navigate(route.screen, { params: route.params })
+      return
+    }
     if (n.action === 'Join waiting room') nav.navigate('waiting-room', { params: { id: 'a1' } })
     else if (n.action === 'View report') nav.navigate('lab-report')
     else if (n.action === 'Reorder') {
@@ -164,10 +178,12 @@ export function ProfileScreen() {
     { Icon: Users, label: 'Family members', sub: `${members.length} profiles`, screen: 'family' },
     { Icon: HeartPulse, label: 'Medical information', sub: 'Allergies, conditions, medication', screen: 'medical-info' },
   ]
+  const liveCounts = useSelfCounts()
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
   const activityMenu = [
-    { Icon: CalendarDays, label: 'Appointments', sub: '17 consultations', screen: 'appointments' },
-    { Icon: FileText, label: 'Prescriptions', sub: '12 prescriptions', screen: 'prescription-history' },
-    { Icon: FlaskConical, label: 'Lab reports', sub: '8 reports', screen: 'lab-reports' },
+    { Icon: CalendarDays, label: 'Appointments', sub: LIVE ? plural(liveCounts?.consultations ?? 0, 'consultation') : '17 consultations', screen: 'appointments' },
+    { Icon: FileText, label: 'Prescriptions', sub: LIVE ? plural(liveCounts?.prescriptions ?? 0, 'prescription') : '12 prescriptions', screen: 'prescription-history' },
+    { Icon: FlaskConical, label: 'Lab reports', sub: LIVE ? plural(liveCounts?.reports ?? 0, 'report') : '8 reports', screen: 'lab-reports' },
     { Icon: CreditCard, label: 'Payments', sub: 'Invoices and refunds', screen: 'payments' },
   ]
   const accountMenu = [
@@ -186,7 +202,8 @@ export function ProfileScreen() {
           <Div className="flex-row items-center gap-4">
             <Div className="relative">
               <Avatar src={patient.photo} name={patient.name} size={72} radius={24} />
-              <IconButton
+              {/* Live: profile photos need authenticated image loading, not built yet. */}
+              {!LIVE && <IconButton
                 size={26}
                 tone="brand"
                 label="Edit photo"
@@ -194,7 +211,7 @@ export function ProfileScreen() {
                 className="absolute -bottom-1 -right-1 ring-[3px] ring-white"
               >
                 <Pencil className="h-[12px] w-[12px]" strokeWidth={2.4} />
-              </IconButton>
+              </IconButton>}
             </Div>
             <Div className="min-w-0 flex-1">
               <P className="truncate text-title-md text-ink-900">{patient.name}</P>
@@ -207,10 +224,12 @@ export function ProfileScreen() {
             <MetaChip className="!bg-white shadow-tile">
               {patient.age} yrs · {patient.gender}
             </MetaChip>
-            <MetaChip className="!bg-critical-50 !text-critical-700">
-              <Droplet className="h-[11px] w-[11px]" /> {patient.bloodGroup}
-            </MetaChip>
-            <MetaChip className="!bg-white shadow-tile">{patient.id}</MetaChip>
+            {(!LIVE || patient.bloodGroup) && (
+              <MetaChip className="!bg-critical-50 !text-critical-700">
+                <Droplet className="h-[11px] w-[11px]" /> {patient.bloodGroup}
+              </MetaChip>
+            )}
+            <MetaChip className="!bg-white shadow-tile">{LIVE ? patient.code ?? '' : patient.id}</MetaChip>
           </Div>
         </Div>
 
@@ -324,9 +343,9 @@ export function MedicalInfoScreen() {
         <Card elevation="tile" padded={false}>
           <Div className=" grid-cols-3 divide-x divide-ink-100">
             {[
-              { label: 'Blood group', value: medicalInfo.bloodGroup, tone: 'text-critical-600' },
-              { label: 'Height', value: medicalInfo.height, tone: 'text-ink-900' },
-              { label: 'Weight', value: medicalInfo.weight, tone: 'text-ink-900' },
+              { label: 'Blood group', value: medicalInfo.bloodGroup || '—', tone: 'text-critical-600' },
+              { label: 'Height', value: medicalInfo.height || '—', tone: 'text-ink-900' },
+              { label: 'Weight', value: medicalInfo.weight || '—', tone: 'text-ink-900' },
             ].map((v) => (
               <Div key={v.label} className="px-3 py-3.5 text-center">
                 <P className={`text-title-md leading-none ${v.tone}`} style={{ lineHeight: 24, marginVertical: -2 }}>{v.value}</P>
@@ -348,6 +367,7 @@ export function MedicalInfoScreen() {
                 {a}
               </Span>
             ))}
+            {medicalInfo.allergies.length === 0 && <P className="text-body-sm text-critical-700/80">No known allergies added</P>}
           </Div>
           <P className="mt-3 text-caption leading-[17px] text-critical-700/80">
             Shown to every doctor you consult and printed on every prescription.
@@ -364,6 +384,11 @@ export function MedicalInfoScreen() {
             <P className="text-title-sm text-ink-900">Emergency contact</P>
           </Div>
           <Divider className="my-3" />
+          {!medicalInfo.emergency.name ? (
+            <Btn onPress={edit} className="tap">
+              <P className="text-body-sm font-semibold text-brand-600">Add an emergency contact</P>
+            </Btn>
+          ) : (
           <Div className="flex-row items-center gap-3.5">
             <Avatar name={medicalInfo.emergency.name} size={42} radius={14} />
             <Div className="min-w-0 flex-1">
@@ -381,10 +406,19 @@ export function MedicalInfoScreen() {
               <Phone className="h-[16px] w-[16px]" strokeWidth={2.3} />
             </IconButton>
           </Div>
+          )}
         </Card>
       </Div>
     </Screen>
   )
+}
+
+/** Live: the account holder's record counts (appointments, prescriptions, reports, documents). */
+function useSelfCounts() {
+  const id = useProfile((s) => s.profile.id)
+  const cached = useRecords((s) => s.counts[id])
+  const q = useQuery({ queryKey: ['record-counts', id], queryFn: () => loadRecordCounts(id), enabled: LIVE && Boolean(id), initialData: cached })
+  return q.data
 }
 
 function InfoBlock({
@@ -476,9 +510,11 @@ const LEDGER_SEGMENTS: Record<string, PaymentRecord['type'] | null> = {
 
 export function PaymentsScreen() {
   const ledger = usePayments((s) => s.ledger)
+  const serverSummary = usePayments((s) => s.summary)
   const [segment, setSegment] = React.useState('all')
-  const total = ledger.filter((p) => p.status === 'paid').reduce((s, p) => s + p.amount, 0)
-  const summary = spendSummary(ledger)
+  // Live: the server's totals, net of refunds; demo: the ledger shown.
+  const total = LIVE ? serverSummary?.total ?? 0 : ledger.filter((p) => p.status === 'paid').reduce((s, p) => s + p.amount, 0)
+  const summary = spendSummary(ledger, serverSummary)
   const type = LEDGER_SEGMENTS[segment]
   const visible = ledger.filter((p) => !type || p.type === type)
 
@@ -490,9 +526,12 @@ export function PaymentsScreen() {
           title="Payments"
           border={false}
           right={
-            <IconButton size={36} label="Export" onClick={() => showToast('Statement saved to Files', 'success', 'KDC-payments.pdf')}>
-              <Download className="h-[16px] w-[16px] text-ink-700" strokeWidth={2.2} />
-            </IconButton>
+            // Live: statements and invoice PDFs need a file viewer, which the app doesn't have yet.
+            LIVE ? undefined : (
+              <IconButton size={36} label="Export" onClick={() => showToast('Statement saved to Files', 'success', 'KDC-payments.pdf')}>
+                <Download className="h-[16px] w-[16px] text-ink-700" strokeWidth={2.2} />
+              </IconButton>
+            )
           }
         />
         <Div className="px-5 pb-3.5">
@@ -511,7 +550,7 @@ export function PaymentsScreen() {
 
       <Div className="flex-1 px-5 pb-[40px] pt-4">
         <Div className="rounded-card bg-brand-deep p-4 shadow-card">
-          <P className="text-caption text-white/60">Spent in the last 90 days</P>
+          <P className="text-caption text-white/60">{LIVE ? 'Spent on KDC+' : 'Spent in the last 90 days'}</P>
           <P className="mt-1.5 font-display text-[28px] font-extrabold leading-none tabular-nums text-white">
             {rupee(total)}
           </P>
@@ -533,10 +572,24 @@ export function PaymentsScreen() {
           <SectionHeader title="Transactions" className="!px-0 pb-2.5" />
           <Group>
             {visible.map((p) => (
-              <PaymentRow key={p.id} p={p} onClick={() => showToast('Invoice saved to Files', 'success', `${p.ref}.pdf`)} />
+              <PaymentRow
+                key={p.id}
+                p={p}
+                onClick={() =>
+                  LIVE
+                    ? showToast(
+                        p.invoiceNumber ? `Invoice ${p.invoiceNumber}` : `Payment ${p.id}`,
+                        'info',
+                        p.refundedAmount ? `${rupee(p.refundedAmount)} refunded to the original method` : `For ${p.ref}`,
+                      )
+                    : showToast('Invoice saved to Files', 'success', `${p.ref}.pdf`)
+                }
+              />
             ))}
           </Group>
         </Div>
+
+        {LIVE && visible.length === 0 && <P className="px-1 py-6 text-center text-body-sm text-ink-400">No payments yet</P>}
 
         <P className="mt-4 px-1 text-caption leading-[17px] text-ink-400">
           Refunds are credited to the original payment method within 3–5 working days. Invoices are available for every
@@ -556,6 +609,7 @@ export function HelpScreen() {
   const appointments = useAppointments((s) => s.items)
   const recent = upcomingOf(appointments)[0]
   const result = useHelpSearch(text)
+  const [contact, setContact] = React.useState(false)
   const topics = result.data?.topics ?? []
   const questions = result.data?.questions ?? []
   const nothing = result.isSuccess && topics.length === 0 && questions.length === 0
@@ -656,15 +710,77 @@ export function HelpScreen() {
           </Button>
           <Button
             className="flex-1"
-            onClick={() => showToast('A support agent will join shortly', 'info')}
+            onClick={() => (LIVE ? setContact(true) : showToast('A support agent will join shortly', 'info'))}
             icon={<MessageSquare className="h-[16px] w-[16px]" strokeWidth={2.2} />}
           >
             Chat support
           </Button>
         </Div>
-        <P className="mt-2.5 text-center text-caption text-ink-400">Available 24 × 7 · Average response under 2 minutes</P>
+        <P className="mt-2.5 text-center text-caption text-ink-400">
+          {LIVE ? 'Our team replies to your message by notification' : 'Available 24 × 7 · Average response under 2 minutes'}
+        </P>
       </StickyBar>
+
+      {LIVE && <SupportMessageSheet visible={contact} draft={text} bookingRef={recent?.bookingId} onClose={() => setContact(false)} />}
     </Screen>
+  )
+}
+
+/** Live: "Chat support" opens a support ticket (the team answers in the ticket and by notification). */
+function SupportMessageSheet({ visible, draft, bookingRef, onClose }: { visible: boolean; draft: string; bookingRef?: string; onClose: () => void }) {
+  const categories = useQuery({ queryKey: ['ticket-categories'], queryFn: loadTicketCategories, enabled: visible })
+  const [category, setCategory] = React.useState('Other')
+  const [message, setMessage] = React.useState('')
+  const [sending, setSending] = React.useState(false)
+  React.useEffect(() => {
+    if (visible) setMessage(draft)
+  }, [visible, draft])
+  // Topics for doctors and agents aren't offered to patients.
+  const options = (categories.data ?? ['Other']).filter((c) => !['Payments & Payouts', 'Verification', 'Sample Collection'].includes(c))
+  const send = async () => {
+    const description = message.trim()
+    if (description.length < 10) {
+      showToast('Tell us a little more (at least 10 characters)', 'caution')
+      return
+    }
+    setSending(true)
+    try {
+      const t = await createTicket({ subject: description.slice(0, 80), category, description, bookingRef })
+      showToast('Message sent to KDC+ support', 'success', `Ticket ${t.id}`)
+      setMessage('')
+      onClose()
+    } catch (e) {
+      showToast(errorMessage(e, 'Could not send your message. Please try again.'), 'critical')
+    } finally {
+      setSending(false)
+    }
+  }
+  return (
+    <SheetModal
+      visible={visible}
+      onClose={onClose}
+      title="Message KDC+ support"
+      footer={
+        <Button loading={sending} onClick={send}>
+          Send message
+        </Button>
+      }
+    >
+      <Div className="gap-4 pb-2">
+        <Field label="Topic">
+          <Div className="flex-row flex-wrap gap-2">
+            {options.map((c) => (
+              <FilterChip key={c} active={category === c} onClick={() => setCategory(c)}>
+                {c}
+              </FilterChip>
+            ))}
+          </Div>
+        </Field>
+        <Field label="How can we help?" required>
+          <TextArea value={message} onChangeText={setMessage} placeholder="Describe the problem, with any booking or order number" />
+        </Field>
+      </Div>
+    </SheetModal>
   )
 }
 
@@ -684,10 +800,37 @@ export function SettingsScreen() {
   const settings = useSettings()
   const [languageOpen, setLanguageOpen] = React.useState(false)
   const [confirm, setConfirm] = React.useState<'logout' | 'delete' | null>(null)
+  const [deleting, setDeleting] = React.useState(false)
+  const devices = useQuery({
+    queryKey: ['sessions'],
+    queryFn: () => api.get<{ id: number; platform: string | null; current: boolean }[]>('me/sessions'),
+    enabled: LIVE,
+  })
+  const access = useQuery({
+    queryKey: ['record-access', patient.id],
+    queryFn: () => api.get<{ grants: { active: boolean; doctor: { name: string } }[] }>(`patient/members/${patient.id}/record-access`),
+    enabled: LIVE && Boolean(patient.id),
+  })
   const signOut = () => {
     logout()
     nav.resetTo('login')
   }
+  const confirmed = async () => {
+    if (confirm === 'delete' && LIVE) {
+      // Live: the server sends a confirmation code by SMS before anything is erased.
+      try {
+        await requestDeletionCode()
+        setConfirm(null)
+        setDeleting(true)
+      } catch (e) {
+        showToast(errorMessage(e, 'Could not send the confirmation code.'), 'critical')
+      }
+      return
+    }
+    signOut()
+  }
+  const activeGrants = (access.data?.grants ?? []).filter((g) => g.active)
+  const sessionCount = devices.data?.length ?? 0
   return (
     <Screen background="bg-canvas" padBottom={false}>
       <ScreenHeader title="Settings" />
@@ -698,7 +841,7 @@ export function SettingsScreen() {
           <Group>
             <ListRow icon={<User className="h-[16px] w-[16px]" strokeWidth={2.1} />} title="Personal information" subtitle={patient.mobile} onClick={() => nav.navigate('profile-setup')} />
             <ListRow icon={<Users className="h-[16px] w-[16px]" strokeWidth={2.1} />} title="Family members" subtitle={`${memberCount} profiles`} onClick={() => nav.navigate('family')} />
-            <ListRow icon={<CreditCard className="h-[16px] w-[16px]" strokeWidth={2.1} />} title="Payment methods" subtitle="UPI and 2 cards" last onClick={() => nav.navigate('payments')} />
+            <ListRow icon={<CreditCard className="h-[16px] w-[16px]" strokeWidth={2.1} />} title="Payment methods" subtitle={LIVE ? 'UPI, cards and payment history' : 'UPI and 2 cards'} last onClick={() => nav.navigate('payments')} />
           </Group>
         </Div>
 
@@ -731,20 +874,32 @@ export function SettingsScreen() {
               icon={<Lock className="h-[16px] w-[16px]" strokeWidth={2.1} />}
               title="Manage data sharing"
               subtitle="Which doctors can see your records"
-              onClick={() => showToast('No doctor currently has access', 'info')}
+              onClick={() =>
+                LIVE
+                  ? showToast(
+                      activeGrants.length ? `${activeGrants.length} doctor${activeGrants.length === 1 ? '' : 's'} can see your records` : 'No doctor currently has access',
+                      'info',
+                      activeGrants.map((g) => g.doctor.name).join(', ') || undefined,
+                    )
+                  : showToast('No doctor currently has access', 'info')
+              }
             />
             <ListRow
               icon={<ShieldCheck className="h-[16px] w-[16px]" strokeWidth={2.1} />}
               title="Signed-in devices"
-              subtitle="2 active devices"
-              onClick={() => showToast('iPhone 16 Pro and this device', 'info')}
+              subtitle={LIVE ? `${sessionCount} active session${sessionCount === 1 ? '' : 's'}` : '2 active devices'}
+              onClick={() => (LIVE ? showToast(`Signed in on ${sessionCount} device${sessionCount === 1 ? '' : 's'}`, 'info', 'Log out to end this one') : showToast('iPhone 16 Pro and this device', 'info'))}
             />
             <ListRow
               icon={<Download className="h-[16px] w-[16px]" strokeWidth={2.1} />}
               title="Download my data"
               subtitle="Export records as PDF"
               last
-              onClick={() => showToast('Export saved to Files', 'success', 'KDC-records.pdf')}
+              onClick={() =>
+                LIVE
+                  ? showToast('Not available in the app yet', 'info', 'Ask KDC+ support for a copy of your records')
+                  : showToast('Export saved to Files', 'success', 'KDC-records.pdf')
+              }
             />
           </Group>
         </Div>
@@ -818,11 +973,13 @@ export function SettingsScreen() {
           body={
             confirm === 'logout'
               ? 'You will need your mobile number and a new code to sign in again.'
-              : 'This permanently removes your records from this device. It cannot be undone.'
+              : LIVE
+                ? 'This permanently erases your profile, family members, medical records and uploaded files from KDC+. We will send a code to confirm. It cannot be undone.'
+                : 'This permanently removes your records from this device. It cannot be undone.'
           }
           actions={
             <>
-              <Button variant="danger" onClick={signOut}>
+              <Button variant="danger" onClick={confirmed}>
                 {confirm === 'logout' ? 'Log out' : 'Delete account'}
               </Button>
               <Button variant="tertiary" onClick={() => setConfirm(null)}>
@@ -832,7 +989,69 @@ export function SettingsScreen() {
           }
         />
       )}
+
+      {LIVE && (
+        <DeleteAccountSheet
+          visible={deleting}
+          mobile={patient.mobileMasked}
+          onClose={() => setDeleting(false)}
+          onDeleted={() => {
+            setDeleting(false)
+            showToast('Your account has been deleted')
+            nav.resetTo('login')
+          }}
+        />
+      )}
     </Screen>
+  )
+}
+
+/** Live: the SMS code that confirms deleting the account. */
+function DeleteAccountSheet({ visible, mobile, onClose, onDeleted }: { visible: boolean; mobile: string; onClose: () => void; onDeleted: () => void }) {
+  const [code, setCode] = React.useState('')
+  const [error, setError] = React.useState<string | undefined>()
+  const [busy, setBusy] = React.useState(false)
+  React.useEffect(() => {
+    if (visible) {
+      setCode('')
+      setError(undefined)
+    }
+  }, [visible])
+  const submit = async () => {
+    setBusy(true)
+    setError(undefined)
+    try {
+      await deleteAccount(code)
+      onDeleted()
+    } catch (e) {
+      setError(errorMessage(e, 'Could not delete the account. Please try again.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <SheetModal
+      visible={visible}
+      onClose={onClose}
+      title="Confirm account deletion"
+      footer={
+        <Div className="gap-2.5">
+          <Button variant="danger" loading={busy} disabled={code.length !== 6} onClick={submit}>
+            Delete my account
+          </Button>
+          <Button variant="tertiary" onClick={onClose}>
+            Keep my account
+          </Button>
+        </Div>
+      }
+    >
+      <Div className="gap-4 pb-2">
+        <P className="text-body leading-[22px] text-ink-600">Enter the 6-digit code we sent to {mobile}.</P>
+        <Field error={error}>
+          <OtpInput value={code} error={Boolean(error)} onChange={setCode} />
+        </Field>
+      </Div>
+    </SheetModal>
   )
 }
 

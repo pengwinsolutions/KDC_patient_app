@@ -38,6 +38,7 @@ import { useDiscovery } from '../store/discovery'
 import { orderPrescription } from '../flows/prescriptions'
 import { showToast } from '../store/toast'
 import { StateBlock } from '../components/ui/Feedback'
+import { LIVE } from '../services/config'
 
 /* -------------------------------------------------- Consultation launcher */
 
@@ -57,7 +58,7 @@ const SERVICES = [
 ]
 
 const QUICK = [
-  { label: 'Doctors', sub: '540+ verified', Icon: Stethoscope, screen: 'doctor-search' },
+  { label: 'Doctors', sub: LIVE ? 'Verified doctors' : '540+ verified', Icon: Stethoscope, screen: 'doctor-search' },
   { label: 'Medicines', sub: 'Delivered today', Icon: Pill, screen: 'pharmacy' },
   { label: 'Lab Tests', sub: 'Home collection', Icon: FlaskConical, screen: 'diagnostics' },
   { label: 'Records', sub: 'All in one place', Icon: FileText, screen: 'records' },
@@ -70,10 +71,12 @@ export function HomeScreen() {
   const prescription = useCatalog((s) => s.prescription)
   const doctors = useCatalog((s) => s.doctors)
   const rxDoctor = getDoctor(prescription.doctorId)
+  const rxActive = useCatalog((s) => s.prescriptionHistory.find((p) => p.rxId === s.prescription.id)?.status === 'active')
   const patient = useProfile((s) => s.profile)
   const unread = useUnreadCount()
   const diagnostics = useOrders((s) => s.diagnostics)
-  const nextTest = diagnosticOrderById(diagnostics, undefined)
+  /* Live: the patient's next active lab booking, if any. */
+  const nextTest = LIVE ? diagnostics.find((o) => o.status === 'active') : diagnosticOrderById(diagnostics, undefined)
   const membership = useMembership()
   const plan = planById(membership.planId)
   const saved = totalSaved(membership.ledger)
@@ -222,7 +225,8 @@ export function HomeScreen() {
         </Div>
 
         {/* ------------------------------------------------- Health snapshot */}
-        <Div className="mt-7">
+        {/* Live: hidden. These are the blueprint's sample readings; the app has no source for real ones yet. */}
+        {!LIVE && <Div className="mt-7">
           <SectionHeader
             title="Recent health activity"
             action="Timeline"
@@ -248,10 +252,10 @@ export function HomeScreen() {
               </Btn>
             </Card>
           </Div>
-        </Div>
+        </Div>}
 
         {/* ------------------------------------------- Latest prescription */}
-        <Div className="mt-6 px-5">
+        {(!LIVE || prescription.id !== '') && <Div className="mt-6 px-5">
           <SectionHeader title="Latest prescription" className="!px-0 pb-3" />
           <Card onClick={() => nav.navigate('prescription', { params: { rxId: prescription.id } })} elevation="tile" padded={false} className="overflow-hidden">
             <Div className="flex-row items-center gap-3.5 p-4">
@@ -259,10 +263,10 @@ export function HomeScreen() {
               <Div className="min-w-0 flex-1">
                 <P className="truncate text-title-sm text-ink-900">{rxDoctor.name}</P>
                 <P className="truncate text-body-sm text-ink-500">
-                  {rxDoctor.specialty} · 22 Sep 2025
+                  {rxDoctor.specialty} · {LIVE ? prescription.date : '22 Sep 2025'}
                 </P>
               </Div>
-              <StatusBadge tone="success">Active</StatusBadge>
+              {(!LIVE || rxActive) && <StatusBadge tone="success">Active</StatusBadge>}
             </Div>
             <Div className="flex-row flex-wrap gap-1.5 px-4 pb-3.5">
               {prescription.medicines.map((m) => (
@@ -281,10 +285,10 @@ export function HomeScreen() {
               <ArrowUpRight className="h-[16px] w-[16px] text-brand-600" strokeWidth={2.4} />
             </Div>
           </Card>
-        </Div>
+        </Div>}
 
         {/* --------------------------------------- Upcoming diagnostic test */}
-        <Div className="mt-6 px-5">
+        {nextTest && <Div className="mt-6 px-5">
           <SectionHeader title="Upcoming diagnostic test" className="!px-0 pb-3" />
           <Card onClick={() => nav.navigate('diagnostic-tracking', { params: { id: nextTest.id } })} elevation="tile">
             <Div className="flex-row items-start gap-3.5">
@@ -308,13 +312,13 @@ export function HomeScreen() {
               </Div>
             </Div>
           </Card>
-        </Div>
+        </Div>}
 
         {/* ---------------------------------------------------- Top doctors */}
         <Div className="mt-7">
           <SectionHeader
             title="Top doctors for you"
-            subtitle="Based on your care history"
+            subtitle={LIVE ? 'Highest rated on KDC+' : 'Based on your care history'}
             action="See all"
             onAction={() => {
               useDiscovery.getState().showAll()

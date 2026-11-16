@@ -12,6 +12,9 @@ import { useNav } from '../navigation/navigation'
 import { getDoctor, getPrescription, useCatalog } from '../store/catalog'
 import { orderPrescription } from '../flows/prescriptions'
 import { showToast } from '../store/toast'
+import { LIVE } from '../services/config'
+import { usePrescriptionDoc } from '../hooks/useCare'
+import { useRxDocs } from '../services/live/prescriptions'
 import { searchPrescriptions } from '../domain/catalogue'
 import { StateBlock } from '../components/ui/Feedback'
 
@@ -19,10 +22,28 @@ import { StateBlock } from '../components/ui/Feedback'
 
 export function PrescriptionScreen() {
   const nav = useNav()
-  const prescription = getPrescription(nav.params.rxId)
-  const d = getDoctor(prescription.doctorId)
+  /* Live: fetched if it isn't in the loaded list yet; re-read when it arrives. */
+  const loaded = usePrescriptionDoc(nav.params.rxId)
+  const latest = useCatalog((s) => s.prescription)
+  const prescription = LIVE ? loaded ?? (nav.params.rxId ? getPrescription(nav.params.rxId) : latest) : getPrescription(nav.params.rxId)
+  const catalogDoctor = getDoctor(prescription.doctorId)
+  /* Live: the doctor as the prescription states them (they may have left the directory since). */
+  const signed = useRxDocs((s) => s.doctors[prescription.doctorId])
+  const d = LIVE && signed
+    ? { ...catalogDoctor, name: signed.name, qualification: signed.qualification ?? '', specialty: signed.specialty ?? catalogDoctor.specialty, hospital: signed.clinic ?? catalogDoctor.hospital, regNo: signed.regNo ?? '', council: signed.council ?? '' }
+    : catalogDoctor
   const share = () => showToast('Prescription link copied', 'success', prescription.id)
   const download = () => showToast('Prescription saved to Files', 'success', `${prescription.id}.pdf`)
+  if (LIVE && !prescription.id) {
+    return (
+      <Screen background="bg-canvas">
+        <ScreenHeader title="Prescription" />
+        <Div className="flex-1 justify-center px-5">
+          <StateBlock icon={<FileText className="h-[30px] w-[30px]" strokeWidth={1.9} />} title="No prescription yet" body="Prescriptions appear here once a doctor issues them after a consultation." />
+        </Div>
+      </Screen>
+    )
+  }
 
   return (
     <Screen background="bg-canvas" padBottom={false}>
@@ -30,7 +51,7 @@ export function PrescriptionScreen() {
         title="Prescription"
         subtitle={prescription.id}
         right={
-          <>
+          LIVE ? undefined : <>
             <IconButton size={36} label="Share" onClick={share}>
               <Share2 className="h-[16px] w-[16px] text-ink-700" strokeWidth={2.2} />
             </IconButton>
@@ -69,7 +90,7 @@ export function PrescriptionScreen() {
                 <P className="mt-0.5 text-caption text-ink-500">
                   {d.specialty} · {d.hospital}
                 </P>
-                <P className="mt-1 text-caption text-ink-400">Reg. No. {d.regNo} · Telangana State Medical Council</P>
+                <P className="mt-1 text-caption text-ink-400">Reg. No. {d.regNo} · {LIVE ? d.council ?? '' : 'Telangana State Medical Council'}</P>
               </Div>
             </Div>
           </Div>
@@ -198,16 +219,20 @@ export function PrescriptionScreen() {
 
       <StickyBar>
         <Div className="flex-row gap-2.5">
-          <Button variant="tertiary" block={false} className="w-[54px] !px-0" aria-label="Download" onClick={download}>
-            <Download className="h-[18px] w-[18px]" strokeWidth={2.2} />
-          </Button>
-          <Button variant="tertiary" block={false} className="w-[54px] !px-0" aria-label="Share" onClick={share}>
-            <Share2 className="h-[18px] w-[18px]" strokeWidth={2.2} />
-          </Button>
+          {!LIVE && (
+            <>
+              <Button variant="tertiary" block={false} className="w-[54px] !px-0" aria-label="Download" onClick={download}>
+                <Download className="h-[18px] w-[18px]" strokeWidth={2.2} />
+              </Button>
+              <Button variant="tertiary" block={false} className="w-[54px] !px-0" aria-label="Share" onClick={share}>
+                <Share2 className="h-[18px] w-[18px]" strokeWidth={2.2} />
+              </Button>
+            </>
+          )}
           <Button
             className="flex-1"
-            onClick={() => {
-              orderPrescription(prescription, d.name)
+            onClick={async () => {
+              await orderPrescription(prescription, d.name)
               nav.navigate('cart', { tab: 'orders' })
             }}
             icon={<ShoppingCart className="h-[17px] w-[17px]" strokeWidth={2.2} />}
@@ -289,9 +314,9 @@ export function PrescriptionHistoryScreen() {
         <Div className="px-5 pb-3.5">
           <Segmented
             options={[
-              { id: 'all', label: 'All', count: 12 },
-              { id: 'active', label: 'Active', count: 1 },
-              { id: 'past', label: 'Past', count: 11 },
+              { id: 'all', label: 'All', count: LIVE ? history.length : 12 },
+              { id: 'active', label: 'Active', count: LIVE ? history.filter((p) => p.status === 'active').length : 1 },
+              { id: 'past', label: 'Past', count: LIVE ? history.filter((p) => p.status !== 'active').length : 11 },
             ]}
             value={segment}
             onChange={(id) => setSegment(id as typeof segment)}
