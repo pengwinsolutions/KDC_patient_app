@@ -1,18 +1,30 @@
-import React, { createContext, useContext, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { Keyboard, KeyboardAvoidingView, Platform, ScrollView, StatusBar, TextInput, View } from 'react-native';
 import { initialWindowMetrics } from 'react-native-safe-area-context';
-import { colorValue, Div, flatten, parseClasses } from '../primitives';
+import { colorValue, Div, fieldFocusListeners, flatten, parseClasses } from '../primitives';
 
 /**
  * Safe areas come from the device the app is running on. The blueprint's
  * iPhone 16 Pro values are only the fallback before metrics are known.
  */
+/**
+ * Android: the space kept clear even when the system bars are hidden (tablet desktop windows,
+ * immersive mode report a zero inset). A hidden status bar comes back over the top of the app,
+ * so the top keeps the status bar's height; the bottom keeps a little breathing room.
+ */
+export function safeTopOf(inset: number): number {
+  return Platform.OS === 'android' ? Math.max(inset, StatusBar.currentHeight || 24) : inset;
+}
+export function safeBottomOf(inset: number): number {
+  return Platform.OS === 'android' ? Math.max(inset, 12) : inset;
+}
+
 export const DEVICE = {
   width: 402,
   height: 874,
   radius: 55,
-  safeTop: initialWindowMetrics?.insets.top ?? 59,
-  safeBottom: initialWindowMetrics?.insets.bottom ?? 34,
+  safeTop: safeTopOf(initialWindowMetrics?.insets.top ?? 59),
+  safeBottom: safeBottomOf(initialWindowMetrics?.insets.bottom ?? 34),
 };
 
 /**
@@ -98,6 +110,45 @@ export function Screen({
   const stickyHeaderIndices = body.flatMap((n, i) => (isSticky(n) ? [i] : []));
   const inTabs = useContext(InTabs);
   const size = useRef({ view: 0, content: 0 });
+  const scroller = useRef<any>(null);
+  const scrollY = useRef(0);
+  /* Android doesn't reliably scroll a focused field above the keyboard: do it here. Only the
+     screen that contains the field can measure it (measureLayout fails for other screens). */
+  useEffect(() => {
+    const reveal = () => {
+      const input: any = TextInput.State.currentlyFocusedInput?.();
+      const sv = scroller.current;
+      const inner = sv?.getInnerViewRef?.();
+      if (!input || !inner) return;
+      sv.measureInWindow((_sx: number, sy: number, _sw: number, sh: number) => {
+        input.measureLayout(
+          inner,
+          (_x: number, y: number, _w: number, h: number) => {
+            // What's visible of the scroller: down to the keyboard's top edge when it's open.
+            const keyboard = Keyboard.metrics();
+            const bottom = keyboard ? Math.min(sy + sh, keyboard.screenY) : sy + sh;
+            const view = bottom - sy;
+            const top = scrollY.current;
+            const margin = 24;
+            if (view <= 0) return;
+            if (y + h + margin > top + view) sv.scrollTo({ y: y + h + margin - view, animated: true });
+            else if (y - margin < top) sv.scrollTo({ y: Math.max(0, y - margin), animated: true });
+          },
+          () => undefined,
+        );
+      });
+    };
+    fieldFocusListeners.add(reveal);
+    // Once when the keyboard opens, and again after the screen has made room for it.
+    const shown = Keyboard.addListener('keyboardDidShow', () => {
+      setTimeout(reveal, 120);
+      setTimeout(reveal, 450);
+    });
+    return () => {
+      fieldFocusListeners.delete(reveal);
+      shown.remove();
+    };
+  }, []);
   const [scrolls, setScrolls] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const measure = () => {
@@ -120,13 +171,18 @@ export function Screen({
       {behind}
       <KeyboardAvoidingView className="flex-1" behavior="padding">
         <ScrollView
-          ref={scrollRef}
+          ref={(r: any) => {
+            scroller.current = r;
+            if (typeof scrollRef === 'function') scrollRef(r);
+            else if (scrollRef) (scrollRef as React.MutableRefObject<any>).current = r;
+          }}
           className="flex-1"
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           stickyHeaderIndices={stickyHeaderIndices}
           scrollEventThrottle={32}
           onScroll={(e) => {
+            scrollY.current = e.nativeEvent.contentOffset.y;
             const y = e.nativeEvent.contentOffset.y > 2;
             if (y !== scrolled) setScrolled(y);
           }}

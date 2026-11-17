@@ -3,7 +3,7 @@
  * reproduce the CSS behaviour React Native lacks: inherited text styles, inline
  * text flow, grid rows, divide lines and flex-shrink on row children.
  */
-import React, { Children, createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { Children, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, {
   Easing, interpolate, SlideInDown, useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming,
@@ -491,12 +491,29 @@ function focusStyle(focus: string, ring: any) {
   };
 }
 
+/**
+ * Screens register here to scroll a newly focused field into view above the keyboard (see
+ * Screen.tsx). Called a moment after focus, once the keyboard has started to open.
+ */
+export const fieldFocusListeners = new Set<() => void>();
+const announceFocus = () => setTimeout(() => fieldFocusListeners.forEach((reveal) => reveal()), 300);
+
 function FieldInput(props: any) {
   const { className, style, onChange, onChangeText, type, readOnly, onFocus, onBlur, value, defaultValue, rest, multiline } = props;
   const [text, setText] = useState<string>(value ?? defaultValue ?? '');
   useEffect(() => { if (value !== undefined) setText(value); }, [value]);
   const parent = useContext(C);
   const [focused, setFocused] = useState(false);
+  // autoFocus is applied a moment after mount: on Android a field inside a sheet that has just
+  // opened (a new window) takes focus before the window can receive the keyboard, so the keyboard
+  // never appears.
+  const { autoFocus, ...inputProps } = rest;
+  const input = useRef<{ focus: () => void } | null>(null);
+  useEffect(() => {
+    if (!autoFocus) return;
+    const t = setTimeout(() => input.current?.focus(), 350);
+    return () => clearTimeout(t);
+  }, [autoFocus]);
   const p = parseClasses(className);
   const t = resolveText({ ...parent.text, align: undefined, ...p.text });
   const ring: any = p.boxStyle?.outlineWidth
@@ -521,7 +538,7 @@ function FieldInput(props: any) {
         onChangeText?.(v);
         onChange?.({ target: { value: v } });
       }}
-      onFocus={(e) => { setFocused(true); onFocus?.(e); }}
+      onFocus={(e) => { setFocused(true); announceFocus(); onFocus?.(e); }}
       onBlur={(e) => { setFocused(false); onBlur?.(e); }}
       className={`${p.layout} ${t.className}`}
       style={[
@@ -532,7 +549,8 @@ function FieldInput(props: any) {
         focusRing,
         { paddingVertical: multiline ? undefined : 0 },
       ]}
-      {...rest}
+      {...inputProps}
+      ref={input as never}
     />
   );
 }

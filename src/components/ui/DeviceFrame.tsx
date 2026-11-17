@@ -1,7 +1,7 @@
 import React from 'react';
 import { useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { DEVICE } from './Screen';
+import { DEVICE, safeBottomOf, safeTopOf } from './Screen';
 
 /**
  * Root wrapper. Screens fill the whole window on phones and tablets alike.
@@ -12,8 +12,8 @@ import { DEVICE } from './Screen';
 export function DeviceFrame({ children }: { children: React.ReactNode }) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  DEVICE.safeTop = insets.top;
-  DEVICE.safeBottom = insets.bottom;
+  DEVICE.safeTop = safeTopOf(insets.top);
+  DEVICE.safeBottom = safeBottomOf(insets.bottom);
   DEVICE.width = width;
   DEVICE.height = height;
   return <View style={{ flex: 1 }}>{children}</View>;
