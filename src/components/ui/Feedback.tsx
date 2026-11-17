@@ -1,6 +1,6 @@
 import { Btn, Div, P, Span } from '../primitives/index'
 import React from 'react'
-import { KeyboardAvoidingView, Modal as NativeModal, Platform } from 'react-native'
+import { KeyboardAvoidingView, Modal as NativeModal } from 'react-native'
 import { FrameBox } from './DeviceFrame'
 import { Check, X, Info, AlertTriangle, Loader2 } from '../primitives/icons'
 import { DEVICE } from './Screen'
@@ -171,7 +171,7 @@ export function BottomSheet({
   return (
     <Div className="absolute inset-0 z-50  flex-col justify-end">
       {scrim && <Btn onPress={onClose} className="absolute inset-0 bg-ink-900/40 " />}
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView behavior="padding">
       <Div
         className="relative animate-sheetUp rounded-t-[26px] bg-white shadow-sheet"
         style={{ paddingBottom: DEVICE.safeBottom }}

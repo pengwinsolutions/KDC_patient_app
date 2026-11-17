@@ -118,7 +118,7 @@ export function Screen({
   return (
     <Div className={`absolute inset-0 flex-col ${background} ${className}`}>
       {behind}
-      <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView className="flex-1" behavior="padding">
         <ScrollView
           ref={scrollRef}
           className="flex-1"

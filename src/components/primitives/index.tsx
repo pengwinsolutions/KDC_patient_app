@@ -481,6 +481,16 @@ function field({ className = '', style, onChange, onChangeText, type, readOnly, 
   return { className, style, onChange, onChangeText, type, readOnly, onFocus, onBlur, value, defaultValue, rest, multiline };
 }
 
+/** `focus:ring-[1.5px] focus:border-brand-600` as a style: a thicker ring in that colour. */
+function focusStyle(focus: string, ring: any) {
+  const width = focus.match(/(?:^|\s)ring-\[([\d.]+)px\]/)?.[1] ?? focus.match(/(?:^|\s)ring-(\d+)(?:\s|$)/)?.[1];
+  const color = focus.match(/(?:^|\s)(?:border|ring)-([a-z]+-\d{2,3})(?:\s|$)/)?.[1];
+  return {
+    borderWidth: width ? Number(width) : ring?.borderWidth ?? 1,
+    ...(color ? { borderColor: colorValue(color) } : null),
+  };
+}
+
 function FieldInput(props: any) {
   const { className, style, onChange, onChangeText, type, readOnly, onFocus, onBlur, value, defaultValue, rest, multiline } = props;
   const [text, setText] = useState<string>(value ?? defaultValue ?? '');
@@ -492,6 +502,10 @@ function FieldInput(props: any) {
   const ring: any = p.boxStyle?.outlineWidth
     ? { borderWidth: p.boxStyle.outlineWidth, borderColor: p.boxStyle.outlineColor, outlineWidth: 0 }
     : null;
+  // Focus styles go in `style`, never the class list: changing an input's classes makes the styling
+  // layer rebuild the native text field, which drops keyboard focus (the keyboard closes or never
+  // opens on the first tap) and its padding.
+  const focusRing: any = focused && p.focus ? focusStyle(p.focus, ring) : null;
   return (
     <TextInput
       allowFontScaling={false}
@@ -509,12 +523,13 @@ function FieldInput(props: any) {
       }}
       onFocus={(e) => { setFocused(true); onFocus?.(e); }}
       onBlur={(e) => { setFocused(false); onBlur?.(e); }}
-      className={`${p.layout} ${t.className} ${focused ? p.focus : ''}`}
+      className={`${p.layout} ${t.className}`}
       style={[
         t.style as any,
         /(^|\s)!?p[xlr]?-/.test(p.layout) ? null : { paddingHorizontal: 0 },
         ...boxStyles(p, parent, style),
         ring,
+        focusRing,
         { paddingVertical: multiline ? undefined : 0 },
       ]}
       {...rest}
