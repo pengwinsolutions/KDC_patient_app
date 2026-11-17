@@ -432,6 +432,10 @@ export function Img({ src, alt, className = '', style, onError, source, ...rest 
     rest = { blurRadius: Platform.OS === 'android' ? Math.max(1, Math.round(r / 2)) : r, ...rest };
   }
   const img = source ?? (typeof src === 'string' ? { uri: src } : src);
+  // No picture (live: photos aren't loaded yet): keep the box, draw nothing. An empty uri is an error on Android.
+  if (!source && (src === '' || src == null)) {
+    return <View {...(p.layout ? { className: p.layout } : null)} style={StyleSheet.flatten(boxStyles(p, parent, style))} accessibilityLabel={alt} />;
+  }
   const pos: string | undefined = style && !Array.isArray(style) ? style.objectPosition : undefined;
   const image = pos && (p.resizeMode ?? 'cover') === 'cover' && !/^(center|50% 50%|center center)$/.test(pos) ? (
     <PositionedImage img={img} pos={pos} layout={p.layout} boxStyle={boxStyles(p, parent, style)} alt={alt} onError={onError} rest={rest} />

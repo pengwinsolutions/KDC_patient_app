@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { Keyboard, KeyboardAvoidingView, Platform, ScrollView, StatusBar, TextInput, View } from 'react-native';
+import { Dimensions, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StatusBar, TextInput, View } from 'react-native';
 import { initialWindowMetrics } from 'react-native-safe-area-context';
 import { colorValue, Div, fieldFocusListeners, flatten, parseClasses } from '../primitives';
 
@@ -13,7 +13,15 @@ import { colorValue, Div, fieldFocusListeners, flatten, parseClasses } from '../
  * so the top keeps the status bar's height; the bottom keeps a little breathing room.
  */
 export function safeTopOf(inset: number): number {
-  return Platform.OS === 'android' ? Math.max(inset, StatusBar.currentHeight || 24) : inset;
+  const top = Platform.OS === 'android' ? Math.max(inset, StatusBar.currentHeight || 24) : inset;
+  // Tablets: a little more room above the first line, which otherwise sits tight under the bar.
+  return isTablet() ? top + 12 : top;
+}
+
+/** A tablet-sized window (the shorter side at least 600 dp): headers and key figures are drawn larger. */
+export function isTablet(): boolean {
+  const { width, height } = Dimensions.get('window');
+  return Math.min(width, height) >= 600;
 }
 export function safeBottomOf(inset: number): number {
   return Platform.OS === 'android' ? Math.max(inset, 12) : inset;
