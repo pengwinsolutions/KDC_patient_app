@@ -1,6 +1,10 @@
 pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
 plugins { id("com.facebook.react.settings") }
-extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+// Node by absolute path, so Android Studio finds it without the terminal's PATH (see node-binary.gradle).
+apply from: new File(settingsDir, 'node-binary.gradle')
+extensions.configure(com.facebook.react.ReactSettingsExtension){ ex ->
+    ex.autolinkLibrariesFromCommand([gradle.ext.nodeBinary, new File(settingsDir, '../node_modules/@react-native-community/cli/build/bin.js').canonicalPath, 'config'])
+}
 rootProject.name = 'com.kdcplus.patient'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')

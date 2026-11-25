@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "881375925641",
+    "project_id": "kdcplus",
+    "storage_bucket": "kdcplus.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:881375925641:android:290b69fee0dd954757bd58",
+        "android_client_info": {
+          "package_name": "com.kdcplus.patient"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAXkitomOGkuktyEcum4eSYf5e0LnhwBrM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

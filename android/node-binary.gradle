@@ -1,0 +1,28 @@
+/*
+ * Where Node is, for every part of the Android build that runs it (autolinking, JS bundling,
+ * some libraries). Android Studio opened from the Dock or Finder doesn't get the terminal's PATH,
+ * so a plain "node" fails there with "Cannot run program node". This looks in the usual places:
+ *   1. NODE_BINARY (set it in the environment or ~/.gradle/gradle.properties to override),
+ *   2. the PATH Gradle was started with (terminal builds),
+ *   3. Homebrew (Apple silicon and Intel), Volta, and the newest nvm version.
+ * Applied from settings.gradle; the result is gradle.ext.nodeBinary.
+ */
+def home = System.getProperty('user.home')
+def candidates = []
+def override = System.getenv('NODE_BINARY') ?: (gradle.startParameter.projectProperties['NODE_BINARY'])
+if (override) candidates << override
+System.getenv('PATH')?.split(File.pathSeparator)?.each { candidates << "${it}/node" }
+candidates += ['/opt/homebrew/bin/node', '/usr/local/bin/node', "${home}/.volta/bin/node"]
+def nvm = new File("${home}/.nvm/versions/node")
+if (nvm.isDirectory()) {
+    def versions = (nvm.listFiles() ?: []).findAll { it.isDirectory() }
+    def parts = { File f -> f.name.replaceFirst('^v', '').tokenize('.').collect { it.isInteger() ? it.toInteger() : 0 } }
+    versions.sort { a, b ->
+        def x = parts(a), y = parts(b)
+        for (int i = 0; i < Math.min(x.size(), y.size()); i++) { if (x[i] != y[i]) return x[i] <=> y[i] }
+        x.size() <=> y.size()
+    }.reverse().each { candidates << "${it}/bin/node" }
+}
+def found = candidates.find { new File(it).canExecute() }
+if (!found) logger.warn('KDC+: Node not found (set NODE_BINARY to its path); falling back to "node" on the PATH.')
+gradle.ext.nodeBinary = found ?: 'node'

@@ -15,6 +15,7 @@ import { describeMethod, methodById, usePayments } from '../store/payments'
 import { useRecords } from '../store/records'
 import type { CalendarDate } from '../domain/schedule'
 import { MOCK_TODAY, formatShortYear } from '../domain/schedule'
+import { plural } from '../domain/plural'
 
 export type PaymentIntent = {
   amount: number
@@ -70,7 +71,7 @@ export const useCheckout = create<CheckoutState>((set) => ({
 
 export type PaymentOutcome =
   | { ok: true; screen: string; params?: Record<string, unknown> }
-  | { ok: false; reason: string; cancelled?: boolean; pending?: boolean }
+  | { ok: false; reason: string; cancelled?: boolean; pending?: boolean; refunded?: boolean }
 
 const today = () => formatShortYear(MOCK_TODAY).replace(/^\w+, /, '')
 
@@ -155,10 +156,10 @@ async function fulfil(intent: PaymentIntent, method: PaymentMethod): Promise<Ext
       })
       useOrders.getState().addPharmacy(order)
       useCart.getState().clear()
-      recordPayment({ type: 'Pharmacy', title: `Medicine order — ${intent.itemCount} items`, amount: intent.amount, ref: order.id }, method)
-      recordSaving('pharmacy', `Medicine order · ${intent.itemCount} items`, intent.bill)
+      recordPayment({ type: 'Pharmacy', title: `Medicine order — ${plural(intent.itemCount, 'item')}`, amount: intent.amount, ref: order.id }, method)
+      recordSaving('pharmacy', `Medicine order · ${plural(intent.itemCount, 'item')}`, intent.bill)
       notify().push({ category: 'Pharmacy', title: 'Order placed', body: `${order.id} · ${order.etaWhen}`, time: 'Just now' })
-      useRecords.getState().addEvent({ type: 'pharmacy', title: 'Medicines ordered', meta: `Order ${order.id} · ${intent.itemCount} items`, date: today(), time: '' })
+      useRecords.getState().addEvent({ type: 'pharmacy', title: 'Medicines ordered', meta: `Order ${order.id} · ${plural(intent.itemCount, 'item')}`, date: today(), time: '' })
       return { ok: true, screen: 'order-tracking', params: { id: order.id } }
     }
     case 'membership':
@@ -169,6 +170,29 @@ async function fulfil(intent: PaymentIntent, method: PaymentMethod): Promise<Ext
   }
 }
 
+/** What was bought is gone from the drafts, as in the demo's checkout. */
+function clearDrafts(intent: PaymentIntent) {
+  if (intent.kind === 'pharmacy') useCart.getState().clear()
+  else if (intent.kind === 'diagnostic') useDiagnosticsDraft.getState().reset()
+  else if (intent.kind === 'consultation') useBooking.getState().clearSlot()
+}
+
+/**
+ * Live: a payment that went through after the app stopped waiting (a late UPI or bank
+ * confirmation). Returns the success outcome once the server has it, else null.
+ */
+export async function checkLatePayment(): Promise<PaymentOutcome | null> {
+  const { intent, inflight, clear } = useCheckout.getState()
+  if (!LIVE || !intent || !inflight) return null
+  const live = require('../services/live/flows-payment') as typeof import('../services/live/flows-payment')
+  const outcome = await live.confirmIfPaid(inflight, (f) => useCheckout.setState({ inflight: f }))
+  if (outcome?.ok) {
+    clearDrafts(intent)
+    clear()
+  }
+  return outcome
+}
+
 /** Charges the current intent and, once paid, creates whatever it was for. */
 export async function runPayment(): Promise<PaymentOutcome> {
   const { intent, clear } = useCheckout.getState()
@@ -177,10 +201,7 @@ export async function runPayment(): Promise<PaymentOutcome> {
     const live = require('../services/live/flows-payment') as typeof import('../services/live/flows-payment')
     const outcome = await live.runLivePayment(intent, useCheckout.getState().inflight, (inflight) => useCheckout.setState({ inflight }))
     if (outcome.ok) {
-      // What was bought is gone from the drafts, as in the demo's checkout.
-      if (intent.kind === 'pharmacy') useCart.getState().clear()
-      else if (intent.kind === 'diagnostic') useDiagnosticsDraft.getState().reset()
-      else if (intent.kind === 'consultation') useBooking.getState().clearSlot()
+      clearDrafts(intent)
       clear()
     } else useCheckout.setState({ lastFailure: outcome })
     return outcome

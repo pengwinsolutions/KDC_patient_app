@@ -162,4 +162,4 @@ export function listingTitle(q: DoctorQuery): string {
   return q.text.trim() ? `Results for “${q.text.trim()}”` : 'All doctors'
 }
 
-export const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
+export { plural } from './plural'

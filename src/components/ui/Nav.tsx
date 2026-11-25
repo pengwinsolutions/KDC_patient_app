@@ -1,5 +1,5 @@
 import { Btn, Div, P, Span } from '../primitives/index'
-import React, { createContext, useContext } from 'react'
+import React, { useContext } from 'react'
 import { ChevronLeft, Home, Stethoscope, CalendarDays, Package, User } from '../primitives/icons'
 import { useNav, type TabId } from '../../navigation/navigation'
 import { DEVICE, DirectStickyHeader, InTabs, tabBarInset } from './Screen'

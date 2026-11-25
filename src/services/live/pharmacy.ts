@@ -143,10 +143,30 @@ export const addressLine = (a: ApiAddressSnapshot | null) =>
 
 const when = (at: string) => `${atToDay(at)}, ${atToTime(at)}`
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * The delivery window as people say it: the server stores the date ("24 Nov, 9 AM–12 PM"), shown
+ * as "Tomorrow · 9 AM–12 PM" while that's true and with its date otherwise. Older orders stored
+ * "Today, 5–8 PM" literally; those are shown as they are.
+ */
+export function deliveryWindow(stored: string, now: Date = new Date()): string {
+  const m = /^(\d{1,2}) ([A-Z][a-z]{2}), (.+)$/.exec(stored)
+  if (!m) return stored.replace(', ', ' · ')
+  const day = (offset: number) => {
+    const d = new Date(now)
+    d.setDate(d.getDate() + offset)
+    return `${d.getDate()} ${MONTHS[d.getMonth()]}`
+  }
+  const date = `${m[1]} ${m[2]}`
+  const label = date === day(0) ? 'Today' : date === day(1) ? 'Tomorrow' : date
+  return `${label} · ${m[3]}`
+}
+
 export function toPharmacyOrder(o: ApiPharmacyOrder): PharmacyOrder {
   const cancelled = o.status === 'cancelled' || o.status === 'returned'
   const delivered = o.status === 'delivered'
-  const slot = o.deliverySlot.replace(', ', ' · ')
+  const slot = deliveryWindow(o.deliverySlot)
   // When each step was reached, from the status history (detail only).
   const stageTimes: string[] = []
   for (const h of o.history ?? []) {

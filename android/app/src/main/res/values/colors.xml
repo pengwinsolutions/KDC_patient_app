@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- KDC+ blue: the accent of push notifications (icon tint, app name). -->
+    <color name="kdc_brand">#0068C8</color>
+</resources>

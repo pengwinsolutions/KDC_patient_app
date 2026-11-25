@@ -19,7 +19,9 @@ export interface AddressesService {
 
 export interface ProfileService {
   save(profile: Profile): Promise<Profile>
-  saveMedical(info: MedicalInfo): Promise<MedicalInfo>
+  /** A family member's medical record; no id means the account holder. */
+  loadMedical(memberId?: string): Promise<MedicalInfo>
+  saveMedical(info: MedicalInfo, memberId?: string): Promise<MedicalInfo>
 }
 
 export interface MembershipService {
@@ -45,9 +47,17 @@ export const mockAddressesService: AddressesService = {
   remove: () => delay(undefined),
 }
 
+/** Demo: family members' records live in memory (the account holder's is in the profile store). */
+const demoMedical = new Map<string, MedicalInfo>()
+const EMPTY_MEDICAL: MedicalInfo = { bloodGroup: '', allergies: [], conditions: [], medications: [], surgeries: [], emergency: { name: '', relation: '', mobile: '' }, height: '', weight: '' }
+
 export const mockProfileService: ProfileService = {
   save: delay,
-  saveMedical: delay,
+  loadMedical: (memberId) => delay(demoMedical.get(memberId ?? 'self') ?? EMPTY_MEDICAL),
+  saveMedical: (info, memberId) => {
+    demoMedical.set(memberId ?? 'self', info)
+    return delay(info)
+  },
 }
 
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']

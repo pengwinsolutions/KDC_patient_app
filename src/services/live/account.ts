@@ -3,6 +3,7 @@
  * preferences. Implements the app's mock service interfaces so the stores work unchanged.
  */
 import type { Address, FamilyMember, MedicalInfo, Profile } from '../../types'
+import { parseMeasure, toApiBlood } from '../../domain/medical'
 import type { AddressesService, FamilyService, ProfileService } from '../account'
 import { formatMobile, normalizeMobile } from '../../validation/schemas'
 import { ServiceError } from '../errors'
@@ -43,7 +44,6 @@ export function toMember(m: MemberView): FamilyMember {
 }
 
 const RELATIONS = ['spouse', 'son', 'daughter', 'mother', 'father', 'other']
-const BLOOD = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']
 
 function memberBody(m: Pick<FamilyMember, 'name' | 'relation' | 'dob' | 'gender' | 'blood' | 'mobile'>, withRelation: boolean) {
   const relation = lower(m.relation)
@@ -51,7 +51,7 @@ function memberBody(m: Pick<FamilyMember, 'name' | 'relation' | 'dob' | 'gender'
     name: m.name.trim(),
     dob: dayToIso(m.dob),
     gender: lower(m.gender),
-    bloodGroup: BLOOD.includes(m.blood) ? m.blood : null,
+    bloodGroup: toApiBlood(m.blood),
     mobile: m.mobile ? normalizeMobile(m.mobile) : null,
   }
   if (withRelation) body.relation = RELATIONS.includes(relation) ? relation : 'other'
@@ -98,24 +98,24 @@ export function toMedical(m: MedicalView): MedicalInfo {
   }
 }
 
-const measure = (v: string) => {
-  const n = parseFloat(v.replace(/[^\d.]/g, ''))
-  return Number.isFinite(n) && n > 0 ? Math.round(n * 10) / 10 : null
-}
+const measure = (v: string) => parseMeasure(v)
 
 function selfId(): number {
   if (!selfMemberId) throw new ServiceError('invalid', 'Complete your profile first.')
   return selfMemberId
 }
 
-export async function loadMedical(memberId = selfId()): Promise<MedicalInfo> {
-  return toMedical(await api.get<MedicalView>(`patient/members/${memberId}/medical`))
+/** Each family member has their own record; no id means the account holder. */
+const memberOf = (memberId?: string | number) => (memberId === undefined || memberId === '' ? selfId() : Number(memberId))
+
+export async function loadMedical(memberId?: string | number): Promise<MedicalInfo> {
+  return toMedical(await api.get<MedicalView>(`patient/members/${memberOf(memberId)}/medical`))
 }
 
-export async function saveMedical(info: MedicalInfo, memberId = selfId()): Promise<MedicalInfo> {
+export async function saveMedical(info: MedicalInfo, memberId?: string | number): Promise<MedicalInfo> {
   const e = info.emergency
   const body = {
-    bloodGroup: BLOOD.includes(info.bloodGroup) ? info.bloodGroup : null,
+    bloodGroup: toApiBlood(info.bloodGroup),
     heightCm: measure(info.height),
     weightKg: measure(info.weight),
     allergies: info.allergies,
@@ -124,12 +124,13 @@ export async function saveMedical(info: MedicalInfo, memberId = selfId()): Promi
     surgeries: info.surgeries,
     emergencyContact: e.name.trim() && e.mobile.trim() ? { name: e.name.trim(), relation: e.relation.trim(), mobile: normalizeMobile(e.mobile) } : null,
   }
-  return toMedical(await api.put<MedicalView>(`patient/members/${memberId}/medical`, body))
+  return toMedical(await api.put<MedicalView>(`patient/members/${memberOf(memberId)}/medical`, body))
 }
 
 export const liveProfileService: ProfileService = {
   save: async (p: Profile) => saveProfile(p),
-  saveMedical: (info) => saveMedical(info),
+  loadMedical: (memberId) => loadMedical(memberId),
+  saveMedical: (info, memberId) => saveMedical(info, memberId),
 }
 
 /* ------------------------------------------------------------ Addresses */

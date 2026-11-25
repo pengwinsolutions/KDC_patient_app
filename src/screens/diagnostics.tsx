@@ -69,6 +69,7 @@ import '../services/live/sync-commerce'
 import { currentStage, DIAGNOSTIC_STAGES, stageState } from '../domain/orderTracking'
 import { labTestPrice } from '../domain/pricing'
 import { NoResultsBody } from './states'
+import { plural } from '../domain/plural'
 
 const STAGE_CAPTION = ['Booking confirmed', 'Technician assigned', 'Awaiting collection', 'Processing at lab', 'Report ready']
 
@@ -276,7 +277,7 @@ export function TestSearchScreen() {
       </Div>
 
       <Div className="px-5 pb-[40px] pt-4">
-        <P className="mb-2.5 text-caption text-ink-400">{found.length} tests found</P>
+        <P className="mb-2.5 text-caption text-ink-400">{plural(found.length, 'test')} found</P>
         <Div className="gap-2.5">
           {result.isPending ? (
             [0, 1, 2].map((i) => <Skeleton key={i} className="h-[150px] w-full" rounded={20} />)
@@ -1328,7 +1329,7 @@ export function LabReportsScreen() {
         <ScreenHeader
           embedded
           title="Lab reports"
-          subtitle={`${labReports.length} reports`}
+          subtitle={plural(labReports.length, 'report')}
           border={false}
           right={
             <IconButton size={36} label="Share" onClick={() => showToast('Report list link copied')}>

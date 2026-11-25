@@ -49,11 +49,17 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>KDC+ uses the camera so you can photograph a prescription or report.</string>
+	<string>KDC+ uses the camera for video consultations with your doctor, and so you can photograph a prescription or report.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>KDC+ uses the microphone so you can talk to your doctor during a video or audio consultation.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string></string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>KDC+ uses your photo library so you can attach a prescription, report or profile photo.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UIAppFonts</key>

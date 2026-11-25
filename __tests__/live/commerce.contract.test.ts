@@ -131,7 +131,7 @@ liveSuite('the patient app on the live backend: pharmacy, diagnostics, reports',
   it('refuses a prescription medicine without a prescription, then takes it with an uploaded one', async () => {
     const rx = useCatalog.getState().medicines.find((m) => m.rx && m.inStock)!
     useCart.getState().add(rx.id, 1)
-    const intent = { kind: 'pharmacy' as const, amount: 0, title: 'Medicine order', subtitle: '', lines: useCart.getState().lines, address: '', slot: 'Today, 5–8 PM', bill, itemCount: 1 }
+    const intent = { kind: 'pharmacy' as const, amount: 0, title: 'Medicine order', subtitle: '', lines: useCart.getState().lines, address: '', slot: 'Tomorrow, 9–12 PM', bill, itemCount: 1 }
     await expect(flows.holdPharmacy(intent, false)).rejects.toMatchObject({ code: 'invalid', field: 'prescription' })
 
     const fileId = await uploadFile(useSession.getState().token!, 'prescription_upload', 'prescription.png', 'image/png', PNG)

@@ -59,11 +59,14 @@ import { usePricing } from '../hooks/usePricing'
 import { useMedicineDetail, useMedicineSearch } from '../hooks/queries'
 import { LIVE } from '../services/config'
 import { loadPharmacyOrder } from '../services/live/pharmacy'
+import { careRules } from '../services/live/doctors'
+import { pharmacyDelivery } from '../domain/pricing'
 import '../services/live/sync-commerce'
 import { useNow } from '../hooks/useNow'
 import { cartSubtotal, rxCoverage, type MedicineFilter } from '../domain/catalogue'
 import { currentStage, PHARMACY_STAGES, stageState } from '../domain/orderTracking'
 import { EmptyCartScreen, NoResultsBody } from './states'
+import { plural } from '../domain/plural'
 
 /** Add and quantity handlers shared by every medicine list. */
 function useMedicineCardActions() {
@@ -216,7 +219,7 @@ export function PharmacyHomeScreen() {
                 </Span>
                 <Div className="min-w-0">
                   <P className="truncate text-[12.5px] font-bold leading-[16px] text-ink-900">{c.name}</P>
-                  <P className="text-[10.5px] text-ink-400">{c.items} products</P>
+                  <P className="text-[10.5px] text-ink-400">{plural(c.items, 'product')}</P>
                 </Div>
               </Btn>
             ))}
@@ -271,7 +274,7 @@ export function MedicineSearchScreen() {
 
       <Div className="px-5 pb-[40px] pt-4">
         <P className="mb-2.5 text-caption text-ink-400">
-          {found.length} results{text.trim() ? ` for “${text.trim()}”` : ''}
+          {plural(found.length, 'result')}{text.trim() ? ` for “${text.trim()}”` : ''}
         </P>
         <Div className="gap-2.5">
           {result.isPending ? (
@@ -283,7 +286,29 @@ export function MedicineSearchScreen() {
           )}
         </Div>
       </Div>
+      <CartBar />
     </Screen>
+  )
+}
+
+/** Once something is in the cart: what's in it and the way to it, without going back. */
+function CartBar() {
+  const nav = useNav()
+  const { lines, bill } = useCartBill()
+  const count = lines.reduce((n, l) => n + l.qty, 0)
+  if (!count) return null
+  return (
+    <StickyBar>
+      <Div className="flex-row items-center gap-3">
+        <Div className="min-w-0 flex-1">
+          <P className="text-caption text-ink-500">{plural(count, 'item')} in your cart</P>
+          <P className="text-title-sm tabular-nums text-ink-900">{rupee(bill.total)}</P>
+        </Div>
+        <Button className="flex-1" onClick={() => nav.navigate('cart')} icon={<ShoppingCart className="h-[17px] w-[17px]" strokeWidth={2.2} />}>
+          View cart
+        </Button>
+      </Div>
+    </StickyBar>
   )
 }
 
@@ -569,7 +594,7 @@ export function CartScreen() {
 
   return (
     <Screen background="bg-canvas" padBottom={false}>
-      <ScreenHeader title="Cart" subtitle={`${lines.length} items`} />
+      <ScreenHeader title="Cart" subtitle={plural(lines.length, 'item')} />
 
       <Div className="flex-1 gap-3 px-5 pb-[170px] pt-4">
         <StepBar step={1} total={2} />
@@ -695,11 +720,29 @@ export function CartScreen() {
 
 /* ================================================= 33 — Checkout ========== */
 
-const DELIVERY_SLOTS = ['Today, 2–5 PM', 'Today, 5–8 PM', 'Tomorrow, 9–12 PM']
+/**
+ * Delivery windows as the server knows them (KDC_backend pharmacy/delivery-slots.ts). Today's are
+ * offered only while at least an hour is left (time to pack and send; the server refuses later),
+ * so tomorrow morning is always there. The order is tracked with the actual date.
+ */
+const DELIVERY_WINDOWS: { value: string; day: string; time: string; endHour: number | null }[] = [
+  { value: 'Today, 2–5 PM', day: 'Today', time: '2–5 PM', endHour: 17 },
+  { value: 'Today, 5–8 PM', day: 'Today', time: '5–8 PM', endHour: 20 },
+  // Sent as the original value, which every server version accepts; shown with the correct wording.
+  { value: 'Tomorrow, 9–12 PM', day: 'Tomorrow', time: '9 AM–12 PM', endHour: null },
+]
+const windowOf = (value: string) => DELIVERY_WINDOWS.find((w) => w.value === value)!
+const SLOT_CUTOFF_MS = 60 * 60_000
+
+export function openDeliverySlots(now: Date = new Date()): string[] {
+  return DELIVERY_WINDOWS.filter((w) => w.endHour === null || new Date(now).setHours(w.endHour, 0, 0, 0) - now.getTime() >= SLOT_CUTOFF_MS).map((w) => w.value)
+}
 
 export function CheckoutScreen() {
   const nav = useNav()
   const { lines, subtotal, bill } = useCartBill()
+  const delivery = LIVE ? pharmacyDelivery(bill.total, careRules.pharmacyDeliveryFee, careRules.pharmacyFreeDeliveryAbove) : { fee: 0, toFree: 0 }
+  const payable = bill.total + delivery.fee
   const coverage = useRxCoverage()
   const addresses = useAddresses((s) => s.items)
   const selectedAddressId = useAddresses((s) => s.selectedId)
@@ -707,7 +750,8 @@ export function CheckoutScreen() {
   const methods = usePayments((s) => s.methods)
   const selectedMethod = usePayments((s) => s.selectedMethodId)
   const selectMethod = usePayments((s) => s.select)
-  const [slot, setSlot] = React.useState(DELIVERY_SLOTS[1])
+  const slots = React.useMemo(() => openDeliverySlots(), [])
+  const [slot, setSlot] = React.useState(slots[0])
   const [addingAddress, setAddingAddress] = React.useState(false)
   const shownAddresses = addresses.filter((a, i) => i < 2 || a.id === selectedAddressId)
   const address = addresses.find((a) => a.id === selectedAddressId)
@@ -725,9 +769,9 @@ export function CheckoutScreen() {
     }
     useCheckout.getState().start({
       kind: 'pharmacy',
-      amount: bill.total,
+      amount: payable,
       title: 'Medicine order',
-      subtitle: `${lines.length} items · ${slot}`,
+      subtitle: `${plural(lines.length, 'item')} · ${windowOf(slot).day}, ${windowOf(slot).time}`,
       lines,
       address: formatAddress(address),
       slot,
@@ -754,7 +798,7 @@ export function CheckoutScreen() {
         <Div>
           <SectionHeader title="Delivery slot" className="!px-0 pb-2.5" />
           <Div className=" grid-cols-3 gap-2.5">
-            {DELIVERY_SLOTS.map((s) => {
+            {slots.map((s) => {
               const on = s === slot
               return (
                 <Btn
@@ -765,8 +809,8 @@ export function CheckoutScreen() {
                   }`}
                 >
                   <Clock className={`mx-auto h-[15px] w-[15px] ${on ? 'text-white/80' : 'text-ink-400'}`} strokeWidth={2.2} />
-                  <P className="mt-1.5 text-[11px] font-bold leading-[14px]">{s.split(', ')[0]}</P>
-                  <P className={`text-[10.5px] ${on ? 'text-white/75' : 'text-ink-400'}`}>{s.split(', ')[1]}</P>
+                  <P className="mt-1.5 text-[11px] font-bold leading-[14px]">{windowOf(s).day}</P>
+                  <P className={`text-[10.5px] ${on ? 'text-white/75' : 'text-ink-400'}`}>{windowOf(s).time}</P>
                 </Btn>
               )
             })}
@@ -808,18 +852,22 @@ export function CheckoutScreen() {
           <P className="mb-1.5 text-title-sm text-ink-900">Order summary</P>
           <KeyValue label={`Item total (${lines.length})`} value={rupee(subtotal)} />
           <MemberDiscountLine amount={subtotal} area="pharmacy" />
-          {LIVE ? (
-            <KeyValue label="Delivery fee" value="Added if below the free-delivery amount" />
+          {delivery.fee > 0 ? (
+            <KeyValue label="Delivery fee" value={rupee(delivery.fee)} />
           ) : (
             <KeyValue label="Delivery fee" value="FREE" tone="success" />
           )}
+          {delivery.toFree > 0 && (
+            <P className="mt-1 text-caption text-brand-700">Add {rupee(delivery.toFree)} more for free delivery</P>
+          )}
           <Divider className="my-2.5" />
-          <KeyValue label={LIVE ? 'Total before delivery' : 'Total payable'} value={rupee(bill.total)} strong />
+          {/* The same total the server charges: what you see is what you pay. */}
+          <KeyValue label="Total payable" value={rupee(payable)} strong />
         </Card>
       </Div>
 
       <StickyBar>
-        <Button onClick={placeOrder}>Place order · {rupee(bill.total)}</Button>
+        <Button onClick={placeOrder}>Place order · {rupee(payable)}</Button>
       </StickyBar>
 
       <AddressFormSheet visible={addingAddress} onClose={() => setAddingAddress(false)} />
@@ -894,7 +942,7 @@ export function OrderTrackingScreen() {
             </Span>
             <Div className="min-w-0 flex-1">
               <P className="text-title-sm text-white">{order.cancelled ? order.statusLabel : finished ? 'Delivered' : order.etaWhen}</P>
-              <P className="mt-0.5 text-body-sm text-white/65">{order.lines.length} items · {rupee(order.trackedTotal ?? order.amount)}</P>
+              <P className="mt-0.5 text-body-sm text-white/65">{plural(order.lines.length, 'item')} · {rupee(order.trackedTotal ?? order.amount)}</P>
             </Div>
           </Div>
           <Div className="mt-3.5 flex-row items-center gap-1.5">

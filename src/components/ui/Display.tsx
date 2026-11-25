@@ -162,6 +162,15 @@ export function Rating({
   showValue?: boolean
   className?: string
 }) {
+  // No reviews yet: "New", never a "0.0" that reads like a bad rating.
+  if (count === 0 || (count === undefined && !value)) {
+    return (
+      <Span className={`inline-flex flex-row items-center gap-1 rounded-chip bg-brand-50 px-2 py-[1px] ${className}`}>
+        <Star className="text-brand-600" style={{ width: size - 2, height: size - 2 }} fill="currentColor" strokeWidth={0} />
+        <Span className="text-caption font-semibold text-brand-700">New</Span>
+      </Span>
+    )
+  }
   return (
     <Span className={`inline-flex flex-row items-center gap-1 ${className}`}>
       <Star className="text-caution-600" style={{ width: size, height: size }} fill="currentColor" strokeWidth={0} />

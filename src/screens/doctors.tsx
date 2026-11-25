@@ -26,6 +26,7 @@ import {
   Building2,
 } from '../components/primitives/icons'
 import { Screen, DEVICE } from '../components/ui/Screen'
+import { Deferred } from '../components/ui/Deferred'
 import { ScreenHeader, BottomNav, HScroll } from '../components/ui/Nav'
 import { SearchInput } from '../components/ui/Inputs'
 import { Button, IconButton, StickyBar } from '../components/ui/Button'
@@ -143,7 +144,11 @@ export function DoctorSearchScreen() {
       <Div className="pb-[112px]">
         <Div className="bg-white px-5 pb-4" style={{ marginTop: -DEVICE.safeTop, paddingTop: DEVICE.safeTop }}>
           <P className="pt-4 text-title-lg text-ink-900">Find a doctor</P>
-          <P className="mt-1 text-body text-ink-500">540+ verified specialists across 24 departments.</P>
+          <P className="mt-1 text-body text-ink-500">
+            {LIVE
+              ? `${plural(doctors.length, 'verified specialist')} across ${plural(specialties.filter((s) => s.count > 0).length, 'department')}.`
+              : '540+ verified specialists across 24 departments.'}
+          </P>
           <Div className="mt-4 flex-row gap-2.5">
             <SearchInput
               placeholder="Search doctors or specialties"
@@ -224,14 +229,19 @@ export function DoctorSearchScreen() {
                   <Span className="flex-col h-[34px] w-[34px] items-center justify-center rounded-[11px] bg-brand-50">
                     <Icon className="h-[16px] w-[16px] text-brand-600" strokeWidth={2.1} />
                   </Span>
-                  <P className="mt-2.5 text-[12px] font-bold leading-[15px] text-ink-900">{s.name}</P>
-                  <P className="mt-[3px] text-[10.5px] text-ink-400">{s.count} doctors</P>
+                  {/* One line, shrinking for long names (it broke "Ophthalmology" mid-word). */}
+                  <P className="mt-2.5 text-[12px] font-bold leading-[15px] text-ink-900" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+                    {s.name}
+                  </P>
+                  <P className="mt-[3px] text-[10.5px] text-ink-400">{plural(s.count, 'doctor')}</P>
                 </Btn>
               )
             })}
           </Div>
         </Div>
 
+        {/* Below the first screen: drawn right after it (src/components/ui/Deferred). */}
+        <Deferred minHeight={700}>
         {/* Trending */}
         <Div className="mt-7">
           <SectionHeader title="Common concerns" className="pb-3" />
@@ -277,6 +287,7 @@ export function DoctorSearchScreen() {
               ))}
           </Div>
         </Div>
+        </Deferred>
         </>
         )}
       </Div>

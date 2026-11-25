@@ -316,12 +316,15 @@ export function sizeValue(tok?: string): number | undefined {
   return m[1] ? Number(m[1]) : Number(m[2]) * SPACING_UNIT;
 }
 
+/** Web-only CSS the native renderer rejects (dropped from styles). */
+const WEB_ONLY = ['backdropFilter', 'WebkitBackdropFilter', 'maskImage', 'WebkitMaskImage', 'objectPosition', 'gridTemplateColumns', 'filter', 'transition', 'animation', 'animationDelay', 'cursor'];
+
 /** Drops CSS the native renderer rejects, and carries gradients across. */
 export function nativeStyle(style: any, sticky = false): any {
   if (!style || typeof style !== 'object' || Array.isArray(style)) return style;
-  const { background, backdropFilter, WebkitBackdropFilter, maskImage, WebkitMaskImage, objectPosition,
-    gridTemplateColumns, filter, backgroundImage, transition, animation, animationDelay, cursor, ...rest } = style;
+  const { background, backgroundImage, ...rest } = style;
   const out: any = { ...rest };
+  for (const key of WEB_ONLY) delete out[key];
   if (sticky) {
     delete out.top;
     if (out.marginTop < 0) out.marginTop = 0;

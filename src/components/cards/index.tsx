@@ -28,6 +28,7 @@ import { getDoctor } from '../../store/catalog'
 import { useListQty } from '../../store/cart'
 import { usePricing } from '../../hooks/usePricing'
 import { PlusTag } from '../ui/Membership'
+import { plural } from '../../domain/plural'
 
 /* ------------------------------------------------------------- Mode tokens */
 
@@ -106,9 +107,12 @@ export function DoctorCard({
       <Div className="mt-3 flex-row flex-wrap gap-1.5">
         <MetaChip>{`${doctor.experience} yrs exp`}</MetaChip>
         <MetaChip>{doctor.languages.slice(0, 2).join(', ')}</MetaChip>
-        <MetaChip>
-          <MapPin className="h-[11px] w-[11px]" /> {`${doctor.distanceKm} km`}
-        </MetaChip>
+        {/* Distance only when it's known (the live server has no patient location yet). */}
+        {doctor.distanceKm ? (
+          <MetaChip>
+            <MapPin className="h-[11px] w-[11px]" /> {`${doctor.distanceKm} km`}
+          </MetaChip>
+        ) : null}
       </Div>
 
       <Div className="mt-3 flex-row items-center gap-1.5 rounded-chip bg-ink-50 px-3 py-2">
@@ -173,8 +177,9 @@ export function AppointmentCard({
       <Div className="overflow-hidden rounded-card bg-brand-deep shadow-lift">
         <Div className="flex-row items-center gap-2 px-4 pb-3 pt-3.5">
           <Span className="flex-row items-center gap-1.5 rounded-[7px] bg-white/15 px-2 py-[3px] text-micro font-semibold uppercase tracking-[.05em] text-white">
-            <Span className="h-[5px] w-[5px] rounded-full bg-vital-500" />
-            Upcoming
+            <Span className={`h-[5px] w-[5px] rounded-full ${appointment.status === 'in-progress' ? 'bg-caution-500' : 'bg-vital-500'}`} />
+            {/* A consultation the doctor has started reads "In progress", not "Upcoming" hours later. */}
+            {appointment.status === 'in-progress' ? 'In progress' : 'Upcoming'}
           </Span>
           <Span className="text-caption text-white/55">{appointment.bookingId}</Span>
           <Span className="ml-auto flex-row items-center gap-1 text-caption font-semibold text-white/85">
@@ -276,7 +281,7 @@ export function PrescriptionCard({
           </Div>
           <P className="truncate text-body-sm text-ink-500">{rx.specialty}</P>
           <P className="mt-1.5 text-caption text-ink-400">
-            {rx.date} · {rx.items} medicines · {rx.rxId}
+            {rx.date} · {plural(rx.items, 'medicine')} · {rx.rxId}
           </P>
         </Div>
       </Div>
@@ -450,7 +455,7 @@ export function LabCard({
           <P className="text-title-sm text-ink-900">{rupee(price ?? lab.price)}</P>
           {/* Live labs carry their report time instead of a slot count (slots are shared across labs). */}
           <P className="mt-0.5 text-caption font-semibold text-vital-600">
-            {lab.testPrices && lab.reportHours ? `Report in ${lab.reportHours} h` : `${lab.slots} slots`}
+            {lab.testPrices && lab.reportHours ? `Report in ${lab.reportHours} h` : plural(lab.slots, 'slot')}
           </P>
         </Div>
       </Div>

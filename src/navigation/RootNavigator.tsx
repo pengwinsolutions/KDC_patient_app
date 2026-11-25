@@ -1,15 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { Linking, Platform, Settings, StatusBar } from 'react-native';
 import {
+  CommonActions,
   createNavigationContainerRef,
   NavigationContainer,
+  StackActions,
   useIsFocused,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createBottomTabNavigator, type BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { BottomNavBar, InTabs } from '../components/ui/Nav';
 import { ALIASES, SCREENS } from './registry';
 import type { ScreenDef } from './types';
+import { ScreenTiming } from '../perf/screenTiming';
+import { useLiveInbox } from '../notifications/inbox';
+import { startPush } from '../notifications/push';
 import { devLaunch, MAIN, resetAction, routes, type TabId } from './navigation';
 import { initialRouteFor, useSession } from '../store/session';
 import { LIVE } from '../services/config';
@@ -35,18 +40,25 @@ const TAB_OF_SCREEN: Record<string, TabId> = {
 routes.aliases = ALIASES;
 routes.tabRoots = new Set(Object.keys(TAB_OF_SCREEN));
 
-function withStatusBar(def: ScreenDef) {
-  const Component = def.Component;
+/**
+ * Sets the status bar while its screen is focused. Kept apart from the screen so that a focus
+ * change re-renders only this, not the whole screen: switching tabs used to re-render both the
+ * tab being left and the one being opened.
+ */
+function FocusedStatusBar({ tone }: { tone: ScreenDef['statusTone'] }) {
+  const focused = useIsFocused();
+  return focused ? <StatusBar barStyle={tone === 'light' ? 'light-content' : 'dark-content'} /> : null;
+}
+
+export function withStatusBar(def: ScreenDef) {
+  const Component = React.memo(def.Component);
   return function ScreenRoute() {
-    const focused = useIsFocused();
     return (
       <>
-        {focused && (
-          <StatusBar
-            barStyle={def.statusTone === 'light' ? 'light-content' : 'dark-content'}
-          />
-        )}
-        <Component />
+        <FocusedStatusBar tone={def.statusTone} />
+        <ScreenTiming id={def.id}>
+          <Component />
+        </ScreenTiming>
       </>
     );
   };
@@ -59,17 +71,70 @@ const TAB_ROUTES = Object.keys(TAB_OF_SCREEN).map((id) => ROUTES.find((r) => r.d
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
+/**
+ * The tab bar. A tap lights the tab up on the next frame and the screen follows, so the bar
+ * answers at once even while the screen is still rendering. Once the first tab is on screen and
+ * the app is idle, the other tabs are rendered in the background, so a first visit is instant too.
+ */
+const PRELOAD_AFTER_MS = 1500;
+
+function TabBar({ state, navigation }: BottomTabBarProps) {
+  const current = TAB_OF_SCREEN[state.routes[state.index].name];
+  const [pressed, setPressed] = useState<TabId | null>(null);
+  useEffect(() => setPressed(null), [current]);
+
+  useEffect(() => {
+    // One tab per idle moment, never all at once: rendering the four other tabs together held the
+    // JS thread for over a second, so a tap right after sign-in waited for all of them. Each
+    // waits for the thread to be idle again (at most 3 s), so taps always go first.
+    const queue = state.routes.filter((r) => r.key !== state.routes[state.index].key).map((r) => r.name);
+    let idle: number | null = null;
+    let frame: number | null = null;
+    const next = () => {
+      const name = queue.shift();
+      if (!name) return;
+      idle = requestIdleCallback(
+        () => {
+          navigation.preload(name);
+          // preload only schedules the render: queue the next tab after that frame, not in this idle period.
+          frame = requestAnimationFrame(next);
+        },
+        { timeout: 3000 },
+      );
+    };
+    // Not until the first screen has been drawn (its native layout must not wait behind a preload).
+    const start = setTimeout(next, PRELOAD_AFTER_MS);
+    return () => {
+      clearTimeout(start);
+      if (idle !== null) cancelIdleCallback(idle);
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+    // Once per sign-in: the tab routes don't change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <BottomNavBar
+      active={pressed ?? current}
+      onSelect={(t) => {
+        const target = ALIASES[t.screen] ?? t.screen;
+        if (t.id === current) return navigation.navigate(target);
+        setPressed(t.id);
+        requestAnimationFrame(() => navigation.navigate(target));
+      }}
+    />
+  );
+}
+
+const renderTabBar = (props: BottomTabBarProps) => <TabBar {...props} />;
+
 function MainTabs() {
   return (
     <InTabs.Provider value={true}>
       <Tab.Navigator
-        screenOptions={{ headerShown: false }}
-        tabBar={({ state, navigation }) => (
-          <BottomNavBar
-            active={TAB_OF_SCREEN[state.routes[state.index].name]}
-            onSelect={(t) => navigation.navigate(ALIASES[t.screen] ?? t.screen)}
-          />
-        )}
+        // Hidden tabs are frozen: a background sync no longer re-renders screens nobody is looking at.
+        screenOptions={{ headerShown: false, freezeOnBlur: true }}
+        tabBar={renderTabBar}
       >
         {TAB_ROUTES.map((r) => (
           <Tab.Screen key={r.def.id} name={r.def.id} component={r.component} />
@@ -120,9 +185,30 @@ function useSessionEnded() {
   }, []);
 }
 
+/** Push after sign-in: a tapped notification opens what it's about. */
+function usePush() {
+  const signedIn = useSession((s) => Boolean(s.token) && s.profileComplete);
+  useEffect(() => {
+    if (!LIVE || !signedIn) return;
+    const open = (screen: string, params: Record<string, unknown>) => {
+      const go = () => {
+        const target = ALIASES[screen] ?? screen;
+        if (routes.tabRoots.has(target)) navigationRef.dispatch(CommonActions.navigate(MAIN, { screen: target, params }));
+        else navigationRef.dispatch(StackActions.push(target, params));
+      };
+      // A push that launched the app can arrive before navigation is ready.
+      if (navigationRef.isReady()) go();
+      else setTimeout(go, 500);
+    };
+    void startPush(open);
+  }, [signedIn]);
+}
+
 export function RootNavigator() {
   useDevDeepLink();
   useSessionEnded();
+  useLiveInbox();
+  usePush();
   /* Read once: later session changes navigate explicitly. */
   const [initialRoute] = useState(() => initialRouteFor(useSession.getState()));
   return (

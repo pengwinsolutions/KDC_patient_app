@@ -9,7 +9,7 @@
 import type { PaymentIntent, PaymentOutcome } from '../../flows/payment'
 import { CASH_ON_DELIVERY, usePayments } from '../../store/payments'
 import { ServiceError } from '../errors'
-import { payFor } from './checkout'
+import { paidLater, payFor } from './checkout'
 import type { Hold } from './holds'
 import { buyHold } from './membership'
 import { syncOne } from './sync'
@@ -62,6 +62,16 @@ const newKey = () => `pay-${Date.now().toString(36)}-${(serial++).toString(36)}-
 
 const LAPSED = 'This booking’s hold has expired, so nothing was charged. Please choose again.'
 
+/** The purchase was paid after the app stopped waiting: finish it like a payment that just went through. */
+export async function confirmIfPaid(inflight: Inflight | null, keep: (f: Inflight | null) => void): Promise<PaymentOutcome | null> {
+  if (!inflight?.hold.online) return null
+  const state = await paidLater(inflight.hold.purposeCode, inflight.idempotencyKey)
+  if (state !== 'paid') return null
+  keep(null)
+  await syncOne(...inflight.hold.sync, 'payments', 'membership').catch(() => undefined)
+  return { ok: true, screen: inflight.hold.screen, params: inflight.hold.params }
+}
+
 /**
  * Runs the live checkout for `intent`. `inflight` is the hold from an earlier attempt at this
  * purchase (if any); `keep` stores the current one (null once it's done or gone).
@@ -84,6 +94,12 @@ export async function runLivePayment(
       const paid = await payFor(hold.purposeCode, current.idempotencyKey)
       if (paid.status === 'cancelled') return { ok: false, reason: 'Payment cancelled. Nothing was charged.', cancelled: true }
       if (paid.status === 'failed') return { ok: false, reason: paid.reason }
+      if (paid.status === 'refunded') {
+        // This hold is spent: a retry needs a fresh one (and a fresh choice, e.g. another slot).
+        keep(null)
+        await syncOne('payments').catch(() => undefined)
+        return { ok: false, reason: paid.reason, refunded: true }
+      }
       if (paid.status === 'pending') {
         return { ok: false, reason: 'Your bank hasn’t confirmed the payment yet. If money was taken, the booking confirms itself or the amount is refunded.', pending: true }
       }

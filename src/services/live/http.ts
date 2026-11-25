@@ -16,7 +16,16 @@ import type { PickedFile } from '../documents'
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
-const OFFLINE = 'Can’t reach KDC+. Check your connection and try again.'
+/**
+ * The request never reached the server (no network, wrong address, timeout). Development
+ * builds name the address, since there the usual cause is a backend that isn't running or
+ * an Android device without the port forwarded.
+ */
+export const OFFLINE = __DEV__
+  ? `Can’t reach the KDC+ server at ${API_CONFIG.baseUrl}. Start the backend (npm run start:dev in KDC_backend); on an Android device, also run npm run api:reverse.`
+  : 'Can’t reach KDC+. Check your connection and try again.'
+/** The server answered but failed (5xx): the connection is fine, so don't send people to check it. */
+const SERVER_DOWN = 'KDC+ is having trouble right now. Please try again in a few minutes.'
 const SESSION_ENDED = 'Your session has ended. Please sign in again.'
 
 let onSessionEnded: (() => void) | null = null
@@ -74,7 +83,7 @@ export function refreshSession(): Promise<string | null> {
         return json.data.accessToken
       }
       if (status === 401) return null
-      throw new ServiceError('unavailable', OFFLINE)
+      throw new ServiceError('unavailable', SERVER_DOWN)
     } finally {
       refreshing = null
     }
@@ -112,9 +121,10 @@ export async function endSession(tokenAtSignOut?: string | null) {
 const CODES: Record<number, import('../errors').ServiceErrorCode> = { 400: 'invalid', 403: 'forbidden', 404: 'not_found', 409: 'conflict', 413: 'too_large', 415: 'unsupported', 422: 'invalid', 429: 'rate_limited' }
 
 function failure(status: number, json: Envelope<unknown> | null): ServiceError {
-  if (status >= 500 || !json) return new ServiceError('unavailable', OFFLINE)
+  // 503 carries the server's own words for maintenance; other failures get a plain apology.
+  if (status >= 500 || !json) return new ServiceError('unavailable', (status === 503 && json?.message) || SERVER_DOWN)
   const [field, messages] = Object.entries(json.errors ?? {})[0] ?? []
-  const message = status === 429 ? 'Too many attempts. Please wait a moment and try again.' : (messages?.[0] ?? json.message ?? OFFLINE)
+  const message = status === 429 ? 'Too many attempts. Please wait a moment and try again.' : (messages?.[0] ?? json.message ?? SERVER_DOWN)
   return new ServiceError(CODES[status] ?? 'invalid', message, field)
 }
 

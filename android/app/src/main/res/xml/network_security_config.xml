@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Release builds: HTTPS only, except this phone's own localhost, which reaches a developer's
+  machine through `adb reverse` (npm run api:reverse) when testing a release build against a
+  local server. Nothing on the network can be reached in plain text.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

@@ -25,7 +25,11 @@ export function logout() {
   if (LIVE) {
     // Ends the session on the server (and forgets the Keychain token), then drops everything loaded.
     const token = useSession.getState().token
-    void (require('../services/live/http') as typeof import('../services/live/http')).endSession(token)
+    // This phone leaves the account first (that needs the session), then the session ends.
+    // Both modules resolved now, not after the network call (nothing loads mid-sign-out).
+    const { stopPush } = require('../notifications/push') as typeof import('../notifications/push')
+    const { endSession } = require('../services/live/http') as typeof import('../services/live/http')
+    void stopPush(token).finally(() => endSession(token))
     ;(require('../services/live/sync') as typeof import('../services/live/sync')).clearAll()
     ;(require('./catalog') as typeof import('./catalog')).clearPatientCatalog()
   }

@@ -20,10 +20,13 @@ export interface CareRules {
   lateCancelFeePercent: number
   bookingHorizonDays: number
   waitingRoomOpensMinutes: number
+  /** Pharmacy delivery: this fee below the free-delivery amount (after any member discount). */
+  pharmacyDeliveryFee: number
+  pharmacyFreeDeliveryAbove: number
 }
 
 /** The server's booking rules (GET /config/public?app=patient); the defaults until loaded. */
-export const careRules: CareRules = { platformFee: 49, freeCancelMinutes: 60, lateCancelFeePercent: 50, bookingHorizonDays: 60, waitingRoomOpensMinutes: 10 }
+export const careRules: CareRules = { platformFee: 49, freeCancelMinutes: 60, lateCancelFeePercent: 50, bookingHorizonDays: 60, waitingRoomOpensMinutes: 10, pharmacyDeliveryFee: 39, pharmacyFreeDeliveryAbove: 300 }
 
 export async function loadCareRules() {
   const cfg = await api.pub<{ rules?: Partial<CareRules> }>('config/public?app=patient')

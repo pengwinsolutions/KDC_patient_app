@@ -68,6 +68,7 @@ import { careRules, groupSlots } from '../services/live/doctors'
 import { selfMemberId } from '../services/live/me'
 import { errorMessage } from '../services/errors'
 import { useProfile } from '../store/profile'
+import { plural } from '../domain/plural'
 
 /** Live: the free-cancellation cut-off, from the server's rule (minutes before the start). */
 function freeCancelUntil(time: string): string {
@@ -533,7 +534,7 @@ export function ClinicScreen() {
 
                 <Div className="mt-3 flex-row items-center justify-between border-t border-ink-100 pt-3">
                   <Span className={`text-body-sm font-bold ${c.slots > 5 ? 'text-vital-700' : 'text-caution-700'}`}>
-                    {c.slots} slots available today
+                    {plural(c.slots, 'slot')} available today
                   </Span>
                   <Span className="text-body-sm font-semibold text-brand-600">Select →</Span>
                 </Div>

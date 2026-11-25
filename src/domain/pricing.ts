@@ -27,9 +27,13 @@ export function memberSaving(amount: number, pct: number): number {
   return amount - memberPrice(amount, pct)
 }
 
-/** What the offer would save a non-member, quoted at the headline rate. */
+/**
+ * What the offer would save a non-member, quoted at the headline rate: the best plan's discount
+ * (the "25% off" the nudge states), within this area's cap. The cap alone is only the most any
+ * plan may give (60% on the live server), so quoting it promised savings no plan delivers.
+ */
 export function wouldSave(amount: number, area: BenefitArea): number {
-  return memberSaving(amount, planConfig.discount[area])
+  return memberSaving(amount, Math.min(planConfig.headlineDiscount, planConfig.discount[area]))
 }
 
 export interface Bill {
@@ -56,4 +60,13 @@ const REFERENCE_TEST_PRICE = 549
 
 export function labTestPrice(testPrice: number, labReferencePrice: number): number {
   return Math.round((testPrice * labReferencePrice) / REFERENCE_TEST_PRICE)
+}
+
+/**
+ * Pharmacy delivery, as the server charges it: `fee` when the order (after any member discount)
+ * is below `freeAbove`, otherwise free. Also how much more would make it free.
+ */
+export function pharmacyDelivery(afterDiscount: number, fee: number, freeAbove: number): { fee: number; toFree: number } {
+  if (afterDiscount >= freeAbove) return { fee: 0, toFree: 0 }
+  return { fee, toFree: Math.ceil(freeAbove - afterDiscount) }
 }

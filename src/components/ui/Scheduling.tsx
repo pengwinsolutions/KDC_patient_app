@@ -3,6 +3,7 @@ import React from 'react'
 import { useLocal } from '../../hooks/useLocal'
 import { ChevronLeft, ChevronRight, Sunrise, Sun, Sunset } from '../primitives/icons'
 import type { SlotView } from '../../domain/schedule'
+import { plural } from '../../domain/plural'
 
 /* ------------------------------------------------------- Horizontal strip */
 
@@ -39,7 +40,7 @@ export function DateStrip({
             <Span className={`text-caption font-medium ${on ? 'text-white/70' : 'text-ink-400'}`}>{d.dow}</Span>
             <Span className={`text-title-sm tabular-nums ${on ? 'text-white' : 'text-ink-900'}`}>{d.date}</Span>
             <Span className={`text-[10px] font-semibold ${on ? 'text-white/80' : d.slots ? 'text-vital-600' : 'text-ink-300'}`}>
-              {d.disabled ? '—' : `${d.slots} slots`}
+              {d.disabled ? '—' : plural(d.slots, 'slot')}
             </Span>
           </Btn>
         )

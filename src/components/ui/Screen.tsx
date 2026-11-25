@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { Dimensions, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StatusBar, TextInput, View } from 'react-native';
+import { Dimensions, Keyboard, KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StatusBar, TextInput, View } from 'react-native';
 import { initialWindowMetrics } from 'react-native-safe-area-context';
 import { colorValue, Div, fieldFocusListeners, flatten, parseClasses } from '../primitives';
 
@@ -57,6 +57,19 @@ export function solidBarInset() {
 /** True inside the tab navigator, where a tab bar sits over the bottom of each screen. */
 export const InTabs = createContext(false);
 
+/** A sticky footer (StickyBar) reports its measured height to its Screen through this. */
+export const FooterLayout = createContext<((height: number) => void) | null>(null);
+
+/** Space kept between the end of a page and the top of its sticky footer. */
+const FOOTER_GAP = 16;
+
+/** The bottom padding a node's own classes give it (pb-[120px], pb-24, py-6…), in points. */
+function bottomPaddingOf(node: any): number {
+  const m = classOf(node).match(/(?:^|\s)p[by]-(?:\[(\d+(?:\.\d+)?)px\]|(\d+(?:\.\d+)?))(?=\s|$)/);
+  if (!m) return 0;
+  return m[1] ? Number(m[1]) : Number(m[2]) * 4;
+}
+
 /**
  * Screen paddings are sized for the iPhone, whose home indicator is
  * see-through. Android bars are solid and its footers and tab bars taller, so
@@ -101,7 +114,10 @@ export function Screen({
   className = '',
   scrollRef,
   topScrim,
+  onRefresh,
 }: {
+  /** Pull-to-refresh: called on pull; the spinner shows until it settles. */
+  onRefresh?: () => Promise<unknown>;
   children: React.ReactNode;
   background?: string;
   padTop?: boolean;
@@ -158,6 +174,17 @@ export function Screen({
     };
   }, []);
   const [scrolls, setScrolls] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const pull = onRefresh
+    ? () => {
+        setRefreshing(true);
+        onRefresh().finally(() => setRefreshing(false));
+      }
+    : undefined;
+  /* The sticky footer's real height. Screens reserve a guessed padding (pb-[120px]) for it, but
+     the footer grows with its content, the safe area and the font size; when the guess is short,
+     the end of the page can't scroll out from under the footer. */
+  const [footerHeight, setFooterHeight] = useState(0);
   const [scrolled, setScrolled] = useState(false);
   const measure = () => {
     const { view, content } = size.current;
@@ -188,6 +215,7 @@ export function Screen({
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           stickyHeaderIndices={stickyHeaderIndices}
+          refreshControl={pull ? <RefreshControl refreshing={refreshing} onRefresh={pull} tintColor="#0068C8" colors={['#0068C8']} /> : undefined}
           scrollEventThrottle={32}
           onScroll={(e) => {
             scrollY.current = e.nativeEvent.contentOffset.y;
@@ -199,7 +227,10 @@ export function Screen({
           contentContainerStyle={{
             flexGrow: 1,
             paddingTop: padTop && !topSticky ? DEVICE.safeTop : 0,
-            paddingBottom: (padBottom ? DEVICE.safeBottom : 0) + tail,
+            paddingBottom: Math.max(
+              (padBottom ? DEVICE.safeBottom : 0) + tail,
+              footerHeight ? footerHeight + FOOTER_GAP - bottomPaddingOf(body[body.length - 1]) : 0,
+            ),
           }}
         >
           {/* React Native copies a sticky child's style onto its own wrapper, so the
@@ -224,7 +255,7 @@ export function Screen({
           } as any}
         />
       )}
-      {front}
+      <FooterLayout.Provider value={(h) => setFooterHeight((prev) => (Math.abs(prev - h) < 1 ? prev : h))}>{front}</FooterLayout.Provider>
     </Div>
   );
 }

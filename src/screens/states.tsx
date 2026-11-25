@@ -37,7 +37,8 @@ import { getDoctor, useCatalog } from '../store/catalog'
 import { useBooking, useSelectedDoctor } from '../store/booking'
 import { useAppointments } from '../store/appointments'
 import { useCall } from '../store/call'
-import { useCheckout, runPayment } from '../flows/payment'
+import { useCheckout, runPayment, checkLatePayment } from '../flows/payment'
+import { CASH_ON_DELIVERY, usePayments } from '../store/payments'
 import { LIVE } from '../services/config'
 import { finishConsultation } from '../flows/consultation'
 import { CancelAppointmentModal } from '../components/forms/AppointmentDialogs'
@@ -312,13 +313,37 @@ export function PaymentFailedScreen() {
   const retry = () => (intent ? nav.navigate('st-payment-processing', { replace: true }) : nav.navigate('payment'))
   const changeMethod = () => (intent ? nav.back() : nav.navigate('payment'))
   // Live: say what actually happened; the slot note only while the server still holds it.
-  const liveTitle = failure?.cancelled ? 'Payment cancelled' : failure?.pending ? 'Waiting for your bank' : 'Payment didn’t go through'
+  const liveTitle = failure?.cancelled ? 'Payment cancelled' : failure?.refunded ? 'Payment refunded' : failure?.pending ? 'Waiting for your bank' : 'Payment didn’t go through'
+
+  // Live: while the server still holds the purchase, keep checking quietly. A UPI or bank
+  // confirmation that arrives after the app stopped waiting moves straight on to success,
+  // instead of leaving "didn't go through" (and a Retry) on screen for a paid booking.
+  React.useEffect(() => {
+    if (!LIVE || !inflight || failure?.refunded) return
+    let alive = true
+    let tries = 0
+    const tick = async () => {
+      if (!alive) return
+      const outcome = await checkLatePayment().catch(() => null)
+      if (!alive) return
+      if (outcome?.ok) return nav.finishTo(outcome.screen, outcome.params)
+      if (++tries < 36) timer = setTimeout(tick, 5000)
+    }
+    let timer = setTimeout(tick, 3000)
+    return () => {
+      alive = false
+      clearTimeout(timer)
+    }
+    // Once per visit to this screen, for the purchase it was shown for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   return (
     <Screen background="bg-white" padBottom={false}>
       <ScreenHeader title="Payment" />
       <Div className=" flex-1 flex-col justify-center pb-[160px]">
         <StateBlock
-          tone={LIVE && (failure?.cancelled || failure?.pending) ? 'neutral' : 'critical'}
+          tone={LIVE && (failure?.cancelled || failure?.pending || failure?.refunded) ? 'neutral' : 'critical'}
           icon={<XCircle className="h-[32px] w-[32px]" strokeWidth={1.8} />}
           title={LIVE ? liveTitle : 'Payment didn’t go through'}
           body={
@@ -355,10 +380,17 @@ export function PaymentFailedScreen() {
 
       <StickyBar>
         <Div className="gap-2.5">
-          <Button onClick={retry}>{LIVE && !inflight ? 'Try again' : 'Retry payment'}</Button>
-          <Button variant="tertiary" onClick={changeMethod}>
-            {LIVE ? 'Go back' : 'Use a different method'}
-          </Button>
+          {/* Refunded: the same purchase can't go through (e.g. the slot was taken), so choose again rather than pay again. */}
+          {LIVE && failure?.refunded ? (
+            <Button onClick={changeMethod}>Choose again</Button>
+          ) : (
+            <Button onClick={retry}>{LIVE && !inflight ? 'Try again' : 'Retry payment'}</Button>
+          )}
+          {!(LIVE && failure?.refunded) && (
+            <Button variant="tertiary" onClick={changeMethod}>
+              {LIVE ? 'Go back' : 'Use a different method'}
+            </Button>
+          )}
         </Div>
       </StickyBar>
     </Screen>
@@ -375,6 +407,9 @@ export function PaymentProcessingScreen() {
   const consultation = intent?.kind === 'consultation' ? intent : null
   const doctor = consultation ? getDoctor(consultation.doctorId) : preview
   const inflight = useCheckout((s) => s.inflight)
+  const cashChosen = usePayments((s) => s.selectedMethodId === CASH_ON_DELIVERY.id)
+  // Cash on delivery places the order without taking a payment: don't say "paying" or "Razorpay".
+  const cash = LIVE && (inflight ? !inflight.hold.online : (intent?.kind === 'pharmacy' || intent?.kind === 'diagnostic') && cashChosen)
 
   React.useEffect(() => {
     navigation.setOptions({ gestureEnabled: false })
@@ -390,11 +425,14 @@ export function PaymentProcessingScreen() {
   return (
     <Screen background="bg-white" padBottom={false}>
       <Div className=" flex-1 flex-col items-center justify-center px-8">
-        <EcgLoader label="Confirming your payment" sub="This usually takes a few seconds. Please don’t close the app or press back." />
+        <EcgLoader
+          label={cash ? 'Placing your order' : 'Confirming your payment'}
+          sub={cash ? 'Just a moment. You’ll pay when it arrives.' : 'This usually takes a few seconds. Please don’t close the app or press back.'}
+        />
 
         <Div className="mt-9 w-full rounded-card bg-ink-50 p-4">
           <Div className="flex-row items-center justify-between">
-            <Span className="text-body-sm text-ink-500">Paying</Span>
+            <Span className="text-body-sm text-ink-500">{cash ? 'Pay on delivery' : 'Paying'}</Span>
             <Span className="text-title-sm text-ink-900">{rupee(inflight?.hold.amount ?? intent?.amount ?? (LIVE ? 0 : 799))}</Span>
           </Div>
           <Divider className="my-3" />
@@ -414,7 +452,7 @@ export function PaymentProcessingScreen() {
 
         <Div className="mt-6 flex-row items-center gap-2 text-caption text-ink-400">
           <Span className="h-[6px] w-[6px] animate-pulse rounded-full bg-brand-600" />
-          {LIVE ? 'Secured by Razorpay' : 'Verifying with your bank'}
+          {cash ? 'Cash on delivery' : LIVE ? 'Secured by Razorpay' : 'Verifying with your bank'}
         </Div>
       </Div>
     </Screen>

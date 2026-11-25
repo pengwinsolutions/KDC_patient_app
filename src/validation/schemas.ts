@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { HEIGHT_CM, measureError, WEIGHT_KG } from '../domain/medical'
 
 const digits = (s: string) => s.replace(/\D/g, '')
 
@@ -89,28 +90,26 @@ export const cardSchema = z.object({
 })
 export type CardForm = z.infer<typeof cardSchema>
 
-export const medicalSchema = z.object({
-  bloodGroup: z.string().min(1, 'Select a blood group'),
-  height: z.string().trim().regex(/^\d{2,3}(\.\d)?\s*(cm)?$/i, 'Enter height in cm'),
-  weight: z.string().trim().regex(/^\d{1,3}(\.\d)?\s*(kg)?$/i, 'Enter weight in kg'),
-  emergencyName: personName,
-  emergencyRelation: z.string().trim().min(2, 'Enter the relationship'),
-  emergencyMobile: requiredMobile,
-})
-export type MedicalForm = z.infer<typeof medicalSchema>
-
 /**
- * Live: a new patient's record starts empty, so every part is optional; what is entered
- * must be valid, and an emergency contact needs a name and a mobile number together.
+ * Medical information. A new record starts empty, so every part is optional; what is entered
+ * must be valid by the server's own limits (src/domain/medical), and an emergency contact needs
+ * a name and a mobile number together.
  */
-export const medicalSchemaLive = z
+export const medicalSchema = z
   .object({
     bloodGroup: z.string(),
-    height: z.union([z.literal(''), z.string().trim().regex(/^\d{2,3}(\.\d)?\s*(cm)?$/i, 'Enter height in cm')]),
-    weight: z.union([z.literal(''), z.string().trim().regex(/^\d{1,3}(\.\d)?\s*(kg)?$/i, 'Enter weight in kg')]),
+    height: z.string().superRefine((v, ctx) => {
+      const error = measureError(v, HEIGHT_CM, 'cm')
+      if (error) ctx.addIssue({ code: 'custom', message: error })
+    }),
+    weight: z.string().superRefine((v, ctx) => {
+      const error = measureError(v, WEIGHT_KG, 'kg')
+      if (error) ctx.addIssue({ code: 'custom', message: error })
+    }),
     emergencyName: z.union([z.literal(''), personName]),
     emergencyRelation: z.string().trim(),
     emergencyMobile: optionalMobile,
   })
   .refine((f) => !f.emergencyName.trim() || f.emergencyMobile.trim(), { path: ['emergencyMobile'], message: 'Enter the contact’s mobile number' })
   .refine((f) => !f.emergencyMobile.trim() || f.emergencyName.trim(), { path: ['emergencyName'], message: 'Enter the contact’s name' })
+export type MedicalForm = z.infer<typeof medicalSchema>

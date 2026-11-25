@@ -33,6 +33,8 @@ export function tw(Icon: React.ComponentType<any>) {
     if (rest || hasStyle) return <View className={rest} style={style}>{glyph}</View>;
     return glyph;
   }
-  TwIcon.inlineIcon = true;
-  return TwIcon;
+  // Memoised: an icon is an SVG, costly to redraw, and its props rarely change when its parent re-renders.
+  const Memo = React.memo(TwIcon) as unknown as React.ComponentType<any> & { inlineIcon: boolean };
+  Memo.inlineIcon = true;
+  return Memo;
 }

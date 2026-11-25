@@ -19,6 +19,7 @@ import {
   Home as HomeIcon,
 } from '../components/primitives/icons'
 import { Screen } from '../components/ui/Screen'
+import { Deferred } from '../components/ui/Deferred'
 import { Logo } from '../components/ui/Logo'
 import { SearchInput } from '../components/ui/Inputs'
 import { Avatar, Card, SectionHeader, StatusBadge, MetaChip } from '../components/ui/Display'
@@ -39,6 +40,12 @@ import { orderPrescription } from '../flows/prescriptions'
 import { showToast } from '../store/toast'
 import { StateBlock } from '../components/ui/Feedback'
 import { LIVE } from '../services/config'
+
+/** "Good morning / afternoon / evening" by the phone's clock (it said "Good morning" all day). */
+export function greeting(now: Date = new Date()): string {
+  const h = now.getHours()
+  return h < 5 ? 'Good evening' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
+}
 
 /* -------------------------------------------------- Consultation launcher */
 
@@ -96,7 +103,7 @@ export function HomeScreen() {
               <Avatar src={patient.photo} name={patient.name} size={44} radius={15} />
             </Btn>
             <Div className="min-w-0 flex-1">
-              <P className="text-caption font-medium text-ink-400">Good morning</P>
+              <P className="text-caption font-medium text-ink-400">{greeting()}</P>
               <P className="truncate text-title-sm text-ink-900">{patient.name}</P>
             </Div>
             <Logo variant="wordmark" width={62} className="opacity-90" />
@@ -224,6 +231,8 @@ export function HomeScreen() {
           </Div>
         </Div>
 
+        {/* Below the first screen: drawn right after it (src/components/ui/Deferred). */}
+        <Deferred minHeight={900}>
         {/* ------------------------------------------------- Health snapshot */}
         {/* Live: hidden. These are the blueprint's sample readings; the app has no source for real ones yet. */}
         {!LIVE && <Div className="mt-7">
@@ -343,6 +352,7 @@ export function HomeScreen() {
             </P>
           </Div>
         </Div>
+        </Deferred>
       </Div>
 
       <BottomNav active="home" />

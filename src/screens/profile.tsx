@@ -1,51 +1,13 @@
 import { Btn, Div, P, Span } from '../components/primitives/index'
 import React from 'react'
-import {
-  User,
-  Users,
-  HeartPulse,
-  CalendarDays,
-  FileText,
-  FlaskConical,
-  CreditCard,
-  MapPin,
-  Bell,
-  ShieldCheck,
-  LifeBuoy,
-  Settings as SettingsIcon,
-  ChevronRight,
-  Sparkles,
-  Pencil,
-  LogOut,
-  Globe,
-  Lock,
-  FileCheck,
-  MessageSquare,
-  Phone,
-  Plus,
-  Droplet,
-  AlertTriangle,
-  Pill,
-  Scissors,
-  UserRound,
-  Trash2,
-  Download,
-} from '../components/primitives/icons'
+import { User, Users, HeartPulse, CalendarDays, FileText, FlaskConical, CreditCard, MapPin, Bell, ShieldCheck, LifeBuoy, Settings as SettingsIcon, ChevronRight, Sparkles, Pencil, LogOut, Globe, Lock, FileCheck, MessageSquare, Phone, Plus, Droplet, Trash2, Download } from '../components/primitives/icons'
 import { Screen, DEVICE } from '../components/ui/Screen'
+import { refreshInbox } from '../notifications/inbox'
+import { Deferred } from '../components/ui/Deferred'
 import { ScreenHeader, LargeHeader, BottomNav, HScroll } from '../components/ui/Nav'
 import { Button, IconButton, StickyBar } from '../components/ui/Button'
 import { Field, OtpInput, RadioRow, SearchInput, TextArea, Toggle } from '../components/ui/Inputs'
-import {
-  Avatar,
-  Card,
-  Group,
-  ListRow,
-  SectionHeader,
-  Segmented,
-  MetaChip,
-  Divider,
-  FilterChip,
-} from '../components/ui/Display'
+import { Avatar, Card, Group, ListRow, SectionHeader, Segmented, MetaChip, FilterChip } from '../components/ui/Display'
 import { Modal, SheetModal, StateBlock } from '../components/ui/Feedback'
 import { NotificationCard, AddressCard, PaymentRow } from '../components/cards/index'
 import { AddressFormSheet } from '../components/forms/Sheets'
@@ -77,6 +39,7 @@ import { api } from '../services/live/http'
 import { useRecords } from '../store/records'
 import { orderPrescription } from '../flows/prescriptions'
 import { pickPhoto } from '../flows/photo'
+import { plural } from '../domain/plural'
 
 /* ============================================== 48 — Notifications ======== */
 
@@ -93,6 +56,10 @@ export function NotificationsScreen() {
   const allRead = feed.every((n) => !n.unread)
   const visible = feed.filter((n) => filter === 'All' || n.category === filter)
   const groups = LIVE ? ['Today', 'Yesterday', 'This week', 'Earlier'] : ['Today', 'Yesterday', 'This week']
+  // Fresh every time the screen opens (and on pull), not just at launch.
+  React.useEffect(() => {
+    void refreshInbox()
+  }, [])
 
   const act = (n: NotificationItem) => {
     markRead(n.id)
@@ -109,7 +76,7 @@ export function NotificationsScreen() {
     }
   }
   return (
-    <Screen background="bg-canvas" padBottom={false}>
+    <Screen background="bg-canvas" padBottom={false} onRefresh={LIVE ? refreshInbox : undefined}>
       <Div className="sticky z-30 bg-white" style={{ marginTop: -DEVICE.safeTop, paddingTop: DEVICE.safeTop, top: -DEVICE.safeTop }}>
         <ScreenHeader
           embedded
@@ -149,7 +116,8 @@ export function NotificationsScreen() {
               <P className="px-5 pb-2.5 text-caption font-bold uppercase tracking-[.08em] text-ink-400">{g}</P>
               <Div className="gap-2.5 px-5">
                 {items.map((n) => (
-                  <NotificationCard key={n.id} n={n} onPress={() => markRead(n.id)} onAction={() => act(n)} />
+                  // The whole card opens what it's about (and marks it read), not just its button.
+                  <NotificationCard key={n.id} n={n} onPress={() => act(n)} onAction={() => act(n)} />
                 ))}
               </Div>
             </Div>
@@ -175,11 +143,10 @@ export function ProfileScreen() {
 
   const careMenu = [
     { Icon: User, label: 'Personal information', sub: 'Name, date of birth, contact', screen: 'profile-setup' },
-    { Icon: Users, label: 'Family members', sub: `${members.length} profiles`, screen: 'family' },
+    { Icon: Users, label: 'Family members', sub: plural(members.length, 'profile'), screen: 'family' },
     { Icon: HeartPulse, label: 'Medical information', sub: 'Allergies, conditions, medication', screen: 'medical-info' },
   ]
   const liveCounts = useSelfCounts()
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
   const activityMenu = [
     { Icon: CalendarDays, label: 'Appointments', sub: LIVE ? plural(liveCounts?.consultations ?? 0, 'consultation') : '17 consultations', screen: 'appointments' },
     { Icon: FileText, label: 'Prescriptions', sub: LIVE ? plural(liveCounts?.prescriptions ?? 0, 'prescription') : '12 prescriptions', screen: 'prescription-history' },
@@ -272,6 +239,8 @@ export function ProfileScreen() {
             </Group>
           </Div>
 
+          {/* Below the first screen: drawn right after it (src/components/ui/Deferred). */}
+          <Deferred minHeight={520}>
           <Div>
             <SectionHeader title="Activity" className="!px-0 pb-2.5" />
             <Group>
@@ -308,6 +277,7 @@ export function ProfileScreen() {
             <Logo variant="wordmark" width={58} className="opacity-45" />
             <P className="text-caption text-ink-300">Version 1.0.0 (build 428)</P>
           </Div>
+          </Deferred>
         </Div>
       </Div>
 
@@ -318,100 +288,6 @@ export function ProfileScreen() {
 
 /* ========================================== 50 — Medical information ====== */
 
-export function MedicalInfoScreen() {
-  const nav = useNav()
-  const patient = useProfile((s) => s.profile)
-  const medicalInfo = useProfile((s) => s.medical)
-  const edit = () => nav.navigate('medical-info-edit')
-  return (
-    <Screen background="bg-canvas" padBottom={false}>
-      <ScreenHeader
-        title="Medical information"
-        subtitle={patient.name}
-        right={
-          <Btn
-            onPress={edit}
-            className="tap px-2 text-body-sm font-semibold text-brand-600"
-          >
-            Edit
-          </Btn>
-        }
-      />
-
-      <Div className="flex-1 gap-3 px-5 pb-[40px] pt-4">
-        {/* Vitals strip */}
-        <Card elevation="tile" padded={false}>
-          <Div className=" grid-cols-3 divide-x divide-ink-100">
-            {[
-              { label: 'Blood group', value: medicalInfo.bloodGroup || '—', tone: 'text-critical-600' },
-              { label: 'Height', value: medicalInfo.height || '—', tone: 'text-ink-900' },
-              { label: 'Weight', value: medicalInfo.weight || '—', tone: 'text-ink-900' },
-            ].map((v) => (
-              <Div key={v.label} className="px-3 py-3.5 text-center">
-                <P className={`text-title-md leading-none ${v.tone}`} style={{ lineHeight: 24, marginVertical: -2 }}>{v.value}</P>
-                <P className="mt-1.5 text-caption text-ink-400">{v.label}</P>
-              </Div>
-            ))}
-          </Div>
-        </Card>
-
-        {/* Allergies — clinically critical, so it carries the red treatment */}
-        <Card elevation="tile" className="!bg-critical-50">
-          <Div className="flex-row items-center gap-2.5">
-            <AlertTriangle className="h-[17px] w-[17px] shrink-0 text-critical-600" strokeWidth={2.2} />
-            <P className="text-title-sm text-critical-700">Allergies</P>
-          </Div>
-          <Div className="mt-3 flex-row flex-wrap gap-2">
-            {medicalInfo.allergies.map((a) => (
-              <Span key={a} className="rounded-chip bg-white px-3 py-1.5 text-body-sm font-bold text-critical-700">
-                {a}
-              </Span>
-            ))}
-            {medicalInfo.allergies.length === 0 && <P className="text-body-sm text-critical-700/80">No known allergies added</P>}
-          </Div>
-          <P className="mt-3 text-caption leading-[17px] text-critical-700/80">
-            Shown to every doctor you consult and printed on every prescription.
-          </P>
-        </Card>
-
-        <InfoBlock Icon={HeartPulse} title="Existing conditions" items={medicalInfo.conditions} onAdd={edit} />
-        <InfoBlock Icon={Pill} title="Current medication" items={medicalInfo.medications} onAdd={edit} />
-        <InfoBlock Icon={Scissors} title="Previous surgeries" items={medicalInfo.surgeries} onAdd={edit} />
-
-        <Card elevation="tile">
-          <Div className="flex-row items-center gap-2.5">
-            <UserRound className="h-[16px] w-[16px] shrink-0 text-brand-600" strokeWidth={2.1} />
-            <P className="text-title-sm text-ink-900">Emergency contact</P>
-          </Div>
-          <Divider className="my-3" />
-          {!medicalInfo.emergency.name ? (
-            <Btn onPress={edit} className="tap">
-              <P className="text-body-sm font-semibold text-brand-600">Add an emergency contact</P>
-            </Btn>
-          ) : (
-          <Div className="flex-row items-center gap-3.5">
-            <Avatar name={medicalInfo.emergency.name} size={42} radius={14} />
-            <Div className="min-w-0 flex-1">
-              <P className="truncate text-body-lg font-semibold text-ink-900">{medicalInfo.emergency.name}</P>
-              <P className="truncate text-body-sm text-ink-500">
-                {medicalInfo.emergency.relation} · {medicalInfo.emergency.mobile}
-              </P>
-            </Div>
-            <IconButton
-              size={36}
-              tone="brand"
-              label="Call"
-              onClick={() => showToast(`Calling ${medicalInfo.emergency.name}`, 'info', medicalInfo.emergency.mobile)}
-            >
-              <Phone className="h-[16px] w-[16px]" strokeWidth={2.3} />
-            </IconButton>
-          </Div>
-          )}
-        </Card>
-      </Div>
-    </Screen>
-  )
-}
 
 /** Live: the account holder's record counts (appointments, prescriptions, reports, documents). */
 function useSelfCounts() {
@@ -421,39 +297,6 @@ function useSelfCounts() {
   return q.data
 }
 
-function InfoBlock({
-  Icon,
-  title,
-  items,
-  onAdd,
-}: {
-  Icon: React.ComponentType<any>
-  title: string
-  items: string[]
-  onAdd: () => void
-}) {
-  return (
-    <Card elevation="tile">
-      <Div className="flex-row items-center justify-between">
-        <Div className="flex-row items-center gap-2.5">
-          <Icon className="h-[16px] w-[16px] shrink-0 text-brand-600" strokeWidth={2.1} />
-          <P className="text-title-sm text-ink-900">{title}</P>
-        </Div>
-        <Btn className="tap" onPress={onAdd} accessibilityLabel={`Add to ${title}`}>
-          <Plus className="h-[17px] w-[17px] text-brand-600" strokeWidth={2.4} />
-        </Btn>
-      </Div>
-      <Div className="mt-3 gap-2">
-        {items.map((i) => (
-          <Div key={i} className="flex-row gap-2.5">
-            <Span className="mt-[8px] h-[5px] w-[5px] shrink-0 rounded-full bg-ink-300" />
-            <P className="text-body leading-[21px] text-ink-700">{i}</P>
-          </Div>
-        ))}
-      </Div>
-    </Card>
-  )
-}
 
 /* ============================================== 51 — Saved addresses ====== */
 
@@ -840,7 +683,7 @@ export function SettingsScreen() {
           <SectionHeader title="Account" className="!px-0 pb-2.5" />
           <Group>
             <ListRow icon={<User className="h-[16px] w-[16px]" strokeWidth={2.1} />} title="Personal information" subtitle={patient.mobile} onClick={() => nav.navigate('profile-setup')} />
-            <ListRow icon={<Users className="h-[16px] w-[16px]" strokeWidth={2.1} />} title="Family members" subtitle={`${memberCount} profiles`} onClick={() => nav.navigate('family')} />
+            <ListRow icon={<Users className="h-[16px] w-[16px]" strokeWidth={2.1} />} title="Family members" subtitle={plural(memberCount, 'profile')} onClick={() => nav.navigate('family')} />
             <ListRow icon={<CreditCard className="h-[16px] w-[16px]" strokeWidth={2.1} />} title="Payment methods" subtitle={LIVE ? 'UPI, cards and payment history' : 'UPI and 2 cards'} last onClick={() => nav.navigate('payments')} />
           </Group>
         </Div>

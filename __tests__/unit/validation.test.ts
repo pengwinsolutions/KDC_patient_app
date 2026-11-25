@@ -112,4 +112,12 @@ describe('medical', () => {
     expect(medicalSchema.safeParse({ ...valid, height: 'tall' }).success).toBe(false)
     expect(medicalSchema.safeParse({ ...valid, emergencyMobile: '123' }).success).toBe(false)
   })
+
+  it('allows an empty record, uses the server’s ranges, and needs a contact’s name and mobile together', () => {
+    const empty = { bloodGroup: '', height: '', weight: '', emergencyName: '', emergencyRelation: '', emergencyMobile: '' }
+    expect(medicalSchema.safeParse(empty).success).toBe(true)
+    expect(medicalSchema.safeParse({ ...empty, height: '300' }).success).toBe(false)
+    expect(medicalSchema.safeParse({ ...empty, weight: '0' }).success).toBe(false)
+    expect(medicalSchema.safeParse({ ...empty, emergencyName: 'Asha Rao' }).success).toBe(false)
+  })
 })

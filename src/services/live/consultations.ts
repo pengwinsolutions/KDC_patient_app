@@ -1,7 +1,7 @@
 /**
  * The patient's side of a consultation on the backend: the waiting room polls the session,
- * joining marks the patient as present, leaving clears it. There's no video or audio yet:
- * the media provider (decision D5) isn't chosen, so `media` is always null for now.
+ * joining marks the patient as present and returns the call credentials, leaving clears it.
+ * The call itself runs on LiveKit (src/call).
  */
 import { api } from './http'
 
@@ -19,11 +19,25 @@ export interface SessionView {
   elapsedSeconds: number | null
 }
 
+/** What the app needs to join the call (LiveKit): one person, one consultation's room. */
+export interface MediaCredentials {
+  provider: string
+  url: string
+  roomId: string
+  token: string
+  expiresAt: string
+}
+
 export interface JoinResult {
   session: SessionView
-  media: unknown | null
+  /** null until calls are set up on the server (Admin → Integrations → LiveKit). */
+  media: MediaCredentials | null
   mediaUnavailableReason: string | null
 }
+
+/** Tells the server the call dropped or came back (shown to the doctor and on the admin monitor). */
+export const reportConnection = (code: string, event: 'dropped' | 'reconnected') =>
+  api.post(`patient/consultations/${encodeURIComponent(code)}/connection`, { event })
 
 export const getSession = (code: string) => api.get<SessionView>(`patient/consultations/${encodeURIComponent(code)}`)
 

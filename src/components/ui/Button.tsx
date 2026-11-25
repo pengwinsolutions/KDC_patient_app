@@ -1,6 +1,6 @@
 import { Btn, Div, Span } from '../primitives/index'
-import React from 'react'
-import { DEVICE, footerInset } from './Screen'
+import React, { useContext } from 'react'
+import { FooterLayout, footerInset } from './Screen'
 import { Loader2 } from '../primitives/icons'
 
 type Variant = 'primary' | 'secondary' | 'tertiary' | 'text' | 'danger' | 'success' | 'onDark' | 'light'
@@ -108,12 +108,15 @@ export function StickyBar({
   className?: string
   blur?: boolean
 }) {
+  const reportHeight = useContext(FooterLayout)
   return (
     <Div
       className={`absolute inset-x-0 bottom-0 z-30 border-t border-ink-100 px-5 pt-3.5 ${
         blur ? 'bg-white/92 ' : 'bg-white'
       } ${className}`}
       style={{ paddingBottom: footerInset() }}
+      // Its Screen keeps the end of the page above this height.
+      onLayout={(e: { nativeEvent: { layout: { height: number } } }) => reportHeight?.(e.nativeEvent.layout.height)}
     >
       {children}
     </Div>

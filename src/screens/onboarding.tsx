@@ -26,7 +26,7 @@ import { services } from '../services'
 import { InvalidOtpError } from '../services/auth'
 import { LIVE } from '../services/config'
 import { errorMessage, ServiceError } from '../services/errors'
-import { restoreSession } from '../services/live/http'
+import { OFFLINE, restoreSession } from '../services/live/http'
 import { loadMe, saveProfile } from '../services/live/me'
 import { syncAll } from '../services/live/sync'
 import {
@@ -125,7 +125,7 @@ export function SplashScreen() {
 
         {offline && (
           <Div className="mt-8 flex-col items-center gap-3 px-8">
-            <P className="text-center text-body-sm text-ink-500">Can’t reach KDC+. Check your connection and try again.</P>
+            <P className="text-center text-body-sm text-ink-500">{OFFLINE}</P>
             <Button variant="secondary" onClick={() => void restore()}>Try again</Button>
           </Div>
         )}

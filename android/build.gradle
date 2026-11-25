@@ -1,5 +1,7 @@
 buildscript {
     ext {
+        // Where react-native is, so libraries (gesture-handler, svg) don't run Node to look for it.
+        REACT_NATIVE_NODE_MODULES_DIR = new File(rootDir, '../node_modules/react-native').canonicalPath
         buildToolsVersion = "37.0.0"
         minSdkVersion = 24
         compileSdkVersion = 37
@@ -15,6 +17,8 @@ buildscript {
         classpath("com.android.tools.build:gradle")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        // Push notifications (Firebase); used only when app/google-services.json is present.
+        classpath("com.google.gms:google-services:4.4.2")
     }
 }
 

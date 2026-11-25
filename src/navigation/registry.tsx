@@ -1,4 +1,5 @@
 import * as Onb from '../screens/onboarding'
+import * as Med from '../screens/medical'
 import { HomeScreen } from '../screens/home'
 import * as Doc from '../screens/doctors'
 import * as Book from '../screens/booking'
@@ -114,8 +115,8 @@ export const SCREENS: ScreenDef[] = [
   /* --------------------------------------------------------- Profile */
   { id: 'notifications', code: '48', title: 'Notifications', section: 'profile', Component: Prof.NotificationsScreen, note: 'Grouped by recency, filterable by care category.' },
   { id: 'profile', code: '49', title: 'Patient Profile', section: 'profile', Component: Prof.ProfileScreen, note: 'Identity, then care, then account.' },
-  { id: 'medical-info', code: '50', title: 'Medical Information', section: 'profile', Component: Prof.MedicalInfoScreen, note: 'Allergies raised to critical styling.' },
-  { id: 'medical-info-edit', code: '50b', title: 'Edit Medical Information', section: 'profile', Component: Ord.MedicalInfoEditScreen, note: 'Allergies get the critical treatment even while editing.' },
+  { id: 'medical-info', code: '50', title: 'Medical Information', section: 'profile', Component: Med.MedicalInfoScreen, note: 'Allergies raised to critical styling.' },
+  { id: 'medical-info-edit', code: '50b', title: 'Edit Medical Information', section: 'profile', Component: Med.MedicalInfoEditScreen, note: 'Allergies get the critical treatment even while editing.' },
   { id: 'addresses', code: '51', title: 'Saved Addresses', section: 'profile', Component: Prof.AddressesScreen, note: 'Used by pharmacy delivery and home sample collection.' },
   { id: 'payments', code: '52', title: 'Payment History', section: 'profile', Component: Prof.PaymentsScreen, note: 'All three revenue streams in one ledger.' },
   { id: 'help', code: '53', title: 'Help & Support', section: 'profile', Component: Prof.HelpScreen, note: 'Self-serve topics first, human contact always visible.' },

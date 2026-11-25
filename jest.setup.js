@@ -29,6 +29,12 @@ jest.mock('react-native-keychain', () => {
 });
 
 // Razorpay Checkout has no native module under Jest; contract tests replace `open` (see __tests__/live/).
+// LiveKit needs WebRTC native modules: tests use the controllable stand-in in test-support/livekit.tsx.
+jest.mock('@livekit/react-native', () => require('./test-support/livekit').reactNative);
+jest.mock('livekit-client', () => require('./test-support/livekit').client);
+// Firebase isn't configured in tests: push is off (src/notifications/push.ts is a no-op without an app).
+jest.mock('@react-native-firebase/app', () => ({ getApps: () => [] }));
+jest.mock('@react-native-firebase/messaging', () => ({}));
 jest.mock('react-native-razorpay', () => ({ __esModule: true, default: { open: jest.fn(async () => ({})) } }));
 
 // Demo by default; with PATIENT_LIVE_URL the app's live layer talks to that backend (contract tests).

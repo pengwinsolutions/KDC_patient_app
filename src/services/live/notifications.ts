@@ -24,6 +24,10 @@ const ACTIONS: Record<string, string> = {
   lab_report: 'View report',
   lab_booking: 'Track booking',
   order: 'Track order',
+  payment: 'View payments',
+  membership: 'View membership',
+  support_ticket: 'Read the reply',
+  waiting_room: 'Join now',
 }
 
 export function toNotification(n: NotificationRow): NotificationItem {
@@ -67,6 +71,14 @@ export function notificationRoute(n: NotificationItem): { screen: string; params
       return { screen: 'diagnostic-tracking', params: { id: code } }
     case 'order':
       return { screen: 'order-tracking', params: { id: code } }
+    case 'waiting_room':
+      return { screen: 'waiting-room', params: { id: code } }
+    case 'payment':
+      return { screen: 'payments', params: {} }
+    case 'membership':
+      return { screen: 'membership-manage', params: {} }
+    case 'support_ticket':
+      return { screen: 'help', params: {} }
     default:
       return null
   }

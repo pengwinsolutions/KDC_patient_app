@@ -1,9 +1,30 @@
 <resources>
 
-    <!-- Base application theme. -->
-    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+    <!--
+      Base application theme. Material 3 (light, like the app) so native dialogs, such as the
+      date-of-birth picker, use Material 3 components in the KDC+ palette (tailwind.config.js).
+    -->
+    <style name="AppTheme" parent="Theme.Material3.Light.NoActionBar">
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+
+        <!-- KDC+ brand blue (brand-600) and its tints -->
+        <item name="colorPrimary">#0068C8</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">#D9EBFF</item>
+        <item name="colorOnPrimaryContainer">#07264A</item>
+        <item name="colorSecondaryContainer">#EEF6FF</item>
+        <item name="colorOnSecondaryContainer">#0057A8</item>
+
+        <!-- White surfaces with clinical-navy text (ink scale) -->
+        <item name="android:colorBackground">#FFFFFF</item>
+        <item name="colorSurface">#FFFFFF</item>
+        <item name="colorSurfaceContainer">#FFFFFF</item>
+        <item name="colorSurfaceContainerHigh">#FFFFFF</item>
+        <item name="colorSurfaceContainerHighest">#EDF2F7</item>
+        <item name="colorOnSurface">#071724</item>
+        <item name="colorOnSurfaceVariant">#425D77</item>
+        <item name="colorOutline">#BBC8D5</item>
+        <item name="colorOutlineVariant">#D8E1EA</item>
     </style>
 
 </resources>

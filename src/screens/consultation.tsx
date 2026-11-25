@@ -35,11 +35,13 @@ import { showToast } from '../store/toast'
 import { finishConsultation, submitConsultationFeedback } from '../flows/consultation'
 import { LIVE } from '../services/config'
 import { errorMessage } from '../services/errors'
-import { joinSession, leaveSession } from '../services/live/consultations'
+import { joinSession, leaveSession, type MediaCredentials } from '../services/live/consultations'
+import { LiveCall } from '../call/LiveCall'
 import { useConsultationSession, usePrescriptionDoc } from '../hooks/useCare'
 import { Banner } from '../components/ui/Feedback'
 import { useElapsed } from '../hooks/useElapsed'
 import { formatDuration, formatTimer } from '../domain/schedule'
+import { plural } from '../domain/plural'
 
 /** The appointment being attended, if the patient arrived from one. */
 function useActiveAppointment() {
@@ -64,9 +66,10 @@ async function endAndComplete(nav: ReturnType<typeof useNav>) {
 /* ================================================= 22 — Waiting room ====== */
 
 /**
- * Live: the patient waits here for the doctor. Joining marks them present on the server;
- * the session is polled. There's no video or audio in the app yet (the media provider,
- * decision D5, isn't chosen), so the room says so instead of showing a call.
+ * Live: the patient waits here for the doctor. Joining marks them present on the server and
+ * returns the call credentials; the session is polled. With credentials the room is the call
+ * itself (the patient's own preview until the doctor joins). Without them (calls not set up on
+ * the server) it says so and still follows the consultation.
  */
 function LiveWaitingRoom() {
   const nav = useNav()
@@ -75,12 +78,14 @@ function LiveWaitingRoom() {
   const d = getDoctor(appointment?.doctorId ?? '')
   const session = useConsultationSession(appointmentId)
   const [notice, setNotice] = React.useState<string | null>(null)
+  const [media, setMedia] = React.useState<MediaCredentials | null>(null)
   React.useEffect(() => {
     if (!appointmentId) return
     useCall.getState().beginWaiting(appointmentId)
     joinSession(appointmentId).then(
       (r) => {
         useCall.getState().enterCall()
+        setMedia(r.media)
         setNotice(r.mediaUnavailableReason)
       },
       (e) => setNotice(errorMessage(e, 'We could not open the waiting room. Please try again.')),
@@ -103,6 +108,20 @@ function LiveWaitingRoom() {
   const finish = async () => {
     await finishConsultation()
     nav.navigate('consult-complete', { replace: true })
+  }
+  if (media && appointmentId && s && (s.mode === 'video' || s.mode === 'audio')) {
+    return (
+      <LiveCall
+        media={media}
+        mode={s.mode}
+        code={appointmentId}
+        doctor={{ name: d.name, specialty: d.specialty, photo: d.photo }}
+        startedAt={s.startedAt ? Date.parse(s.startedAt) : null}
+        ended={ended}
+        onLeave={nav.back}
+        onFinished={() => void finish()}
+      />
+    )
   }
   return (
     <Screen background="bg-canvas" padBottom={false}>
@@ -129,12 +148,14 @@ function LiveWaitingRoom() {
         {notice && (
           <Banner tone="caution" icon={<ShieldCheck className="h-[16px] w-[16px]" strokeWidth={2.2} />} title="About this consultation" body={notice} />
         )}
-        <Banner
-          tone="brand"
-          icon={<Video className="h-[16px] w-[16px]" strokeWidth={2.2} />}
-          title="No in-app video or audio yet"
-          body="Calls inside KDC+ aren't available yet. Keep this screen open: it shows when the doctor starts and ends your consultation."
-        />
+        {notice && (
+          <Banner
+            tone="brand"
+            icon={<Video className="h-[16px] w-[16px]" strokeWidth={2.2} />}
+            title="Keep this screen open"
+            body="It shows when the doctor starts and ends your consultation."
+          />
+        )}
       </Div>
 
       <StickyBar>
@@ -531,8 +552,8 @@ export function ConsultCompleteScreen() {
                   <P className="text-body-lg font-semibold text-ink-900">Prescription issued</P>
                   <P className="truncate text-caption text-ink-400">
                     {LIVE
-                      ? [`${prescription.medicines.length} medicines`, prescription.followUp].filter(Boolean).join(' · ')
-                      : `${prescription.medicines.length} medicines · follow-up in 4 weeks`}
+                      ? [plural(prescription.medicines.length, 'medicine'), prescription.followUp].filter(Boolean).join(' · ')
+                      : `${plural(prescription.medicines.length, 'medicine')} · follow-up in 4 weeks`}
                   </P>
                 </Div>
               </Div>
