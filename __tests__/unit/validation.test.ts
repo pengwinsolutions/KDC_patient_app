@@ -26,6 +26,11 @@ describe('mobile', () => {
     expect(loginSchema.safeParse({ mobile: '984904218712' }).success).toBe(false)
   })
 
+  it('needs an Indian mobile starting 6–9, as the server does', () => {
+    expect(errorOf(loginSchema.safeParse({ mobile: '5849042187' }))).toBe('Enter a 10-digit mobile number')
+    expect(loginSchema.safeParse({ mobile: '+91 61234 56789' }).success).toBe(true)
+  })
+
   it('normalizes, formats and masks', () => {
     expect(normalizeMobile('+91 98490 42187')).toBe('9849042187')
     expect(formatMobile('9849042187')).toBe('+91 98490 42187')
@@ -83,6 +88,7 @@ describe('address', () => {
   it('needs a 6-digit PIN and full line', () => {
     expect(addressSchema.safeParse(valid).success).toBe(true)
     expect(addressSchema.safeParse({ ...valid, pincode: '5000' }).success).toBe(false)
+    expect(addressSchema.safeParse({ ...valid, pincode: '050034' }).success).toBe(false)
     expect(addressSchema.safeParse({ ...valid, line: 'A' }).success).toBe(false)
   })
 })
@@ -119,5 +125,11 @@ describe('medical', () => {
     expect(medicalSchema.safeParse({ ...empty, height: '300' }).success).toBe(false)
     expect(medicalSchema.safeParse({ ...empty, weight: '0' }).success).toBe(false)
     expect(medicalSchema.safeParse({ ...empty, emergencyName: 'Asha Rao' }).success).toBe(false)
+  })
+
+  it('needs the contact’s relationship, which the server requires', () => {
+    const noRelation = medicalSchema.safeParse({ ...valid, emergencyRelation: '' })
+    expect(noRelation.success).toBe(false)
+    expect(noRelation.error?.issues[0]).toMatchObject({ path: ['emergencyName'], message: 'Choose how this contact is related to you' })
   })
 })

@@ -50,7 +50,7 @@ How live builds behave, following the backend's rules:
   - Cancelling shows the server's quote (free, or a late fee and refund).
 - **Consultations:** the waiting room joins and follows the session on the server. **There's no video or audio yet:** the provider (decision D5) isn't chosen, and the screen says so.
 - **Payments:**
-  - The server creates the purchase (appointment, order, lab booking or membership), which holds the slot or stock and prices it. The patient pays that total in Razorpay Checkout (UPI, cards, netbanking, wallets), and the server verifies it.
+  - The server creates the purchase (appointment, order, lab booking or KDC+ Plus subscription), which holds the slot or stock and prices it. The patient pays that total in Razorpay Checkout (UPI, cards, netbanking, wallets), and the server verifies it.
   - There's no card form in the app. Medicines can be paid on delivery, and lab tests at collection.
   - A closed Checkout keeps the purchase on hold, so retrying pays the same one.
 - **Pharmacy and lab tests:**
@@ -58,7 +58,7 @@ How live builds behave, following the backend's rules:
   - Prescription medicines need a KDC+ prescription or an uploaded photo; the server says what isn't covered.
   - Orders and bookings show the server's stages.
   - Lab reports show their results; their files can't be opened yet.
-- **Membership:** plans, member rates and savings come from the server, so displayed member prices match the bills. Auto-renew is only a saved preference, because recurring billing isn't built.
+- **KDC+ Plus subscription** (`membership` module): plans, subscriber rates and savings come from the server, so displayed subscriber prices match the bills. Auto-renew is only a saved preference, because recurring billing isn't built.
 - **Account:** family, medical info, addresses, the health timeline, notifications, settings (saved on the server) and support tickets.
 - **Not yet:**
   - push notifications (needs the KDC+ Firebase files)
@@ -88,6 +88,6 @@ The live contract tests in `__tests__/live/` run the app's own stores and flows 
 | `care` and `care-screens` | Search, doctor detail and slots, booking, reschedule, cancel, the waiting room, prescriptions, feedback; screens render blank, then the server's data |
 | `commerce` | Medicines and tests, labs and slots, cash-on-delivery and prescription orders, lab bookings, stages, reports |
 | `account` | Family, medical, addresses, settings, timeline, notifications, support, account deletion |
-| `money` | Membership through Razorpay Checkout (a cancelled payment and its retry), history and summary, UPI ids, a consultation and pharmacy orders through checkout, ending the membership |
+| `money` | A KDC+ Plus subscription through Razorpay Checkout (a cancelled payment and its retry), history and summary, UPI ids, a consultation and pharmacy orders through checkout, ending the subscription |
 
 They're skipped unless `PATIENT_LIVE_URL` and `PATIENT_DATA` are set; see `test-support/live.ts`. The data file comes from the backend test kit.

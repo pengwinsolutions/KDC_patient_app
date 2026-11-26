@@ -18,9 +18,13 @@ export function rateFor(
   return Math.min(planById(membership.planId).discount, planConfig.discount[area])
 }
 
-/** Member price for a listed amount. Rounded to the rupee — no paise in India. */
+/**
+ * Member price for a listed amount, as the server bills it: the saving is rounded to the
+ * rupee (`rupees(amount × pct / 100)` in the backend's commerce-ops) and taken off the amount.
+ * Rounding the price instead disagrees on halves: ₹450 at 25% is a ₹113 saving (₹337), not ₹112.
+ */
 export function memberPrice(amount: number, pct: number): number {
-  return pct ? Math.round(amount * (1 - pct / 100)) : amount
+  return pct ? amount - Math.round((amount * pct) / 100) : amount
 }
 
 export function memberSaving(amount: number, pct: number): number {

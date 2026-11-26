@@ -12,7 +12,7 @@ describe('what KDC+ Plus would save', () => {
   it('uses the best plan’s rate when the caps are higher (the live server: caps 60%, best plan 25%)', () => {
     planConfig.discount = { consultations: 60, pharmacy: 60, diagnostics: 60 }
     planConfig.headlineDiscount = 25
-    expect(wouldSave(250, 'consultations')).toBe(62) // ₹250 → ₹188 at 25% (whole rupees)
+    expect(wouldSave(250, 'consultations')).toBe(63) // ₹250 at 25%: the server rounds the saving (₹62.50 → ₹63), so ₹187
     expect(wouldSave(31, 'pharmacy')).toBeLessThan(10)
   })
 

@@ -88,7 +88,7 @@ export function MembershipScreen() {
           {planConfig.headlineDiscount}% off every consultation, medicine and test.
         </P>
         <P className="relative mt-2.5 text-body-lg leading-[23px] text-white/65">
-          One membership. The lower price is applied automatically at checkout — there is no code to remember and
+          One subscription. The lower price is applied automatically at checkout — there is no code to remember and
           nothing to claim.
         </P>
 
@@ -178,7 +178,7 @@ export function MembershipScreen() {
         <Div className="flex-row items-start gap-2.5 rounded-tile bg-white p-3.5 shadow-tile">
           <Info className="mt-[1px] h-[16px] w-[16px] shrink-0 text-ink-400" strokeWidth={2.2} />
           <P className="text-body-sm leading-[19px] text-ink-500">
-            The membership covers what KDC+ charges. It does not change doctor-set clinic fees for a visit arranged
+            The subscription covers what KDC+ charges. It does not change doctor-set clinic fees for a visit arranged
             outside the app, and it cannot be combined with a promotional code on the same bill.
           </P>
         </Div>
@@ -186,7 +186,7 @@ export function MembershipScreen() {
 
       <StickyBar>
         <Div className="mb-2.5 flex-row items-baseline justify-between">
-          <Span className="text-body text-ink-500">{plan.name} membership</Span>
+          <Span className="text-body text-ink-500">{plan.name} subscription</Span>
           <Span className="font-display text-[20px] font-extrabold tabular-nums text-ink-900">{rupee(plan.price)}</Span>
         </Div>
         <Button onClick={() => nav.navigate('membership-checkout')}>Continue</Button>
@@ -224,7 +224,7 @@ export function MembershipCheckoutScreen() {
 
   return (
     <Screen background="bg-canvas" padBottom={false}>
-      <ScreenHeader title="Confirm membership" subtitle={`Paying ${rupee(total)}`} />
+      <ScreenHeader title="Confirm subscription" subtitle={`Paying ${rupee(total)}`} />
 
       <Div className="flex-1 gap-5 px-5 pb-[140px] pt-4">
         <Div className="overflow-hidden rounded-card bg-ink-900 p-4 shadow-card">
@@ -250,7 +250,7 @@ export function MembershipCheckoutScreen() {
         </Div>
 
         <Card elevation="tile" className="p-4">
-          <KeyValue label={`Plus membership · ${plan.name}`} value={rupee(plan.price)} />
+          <KeyValue label={`Plus subscription · ${plan.name}`} value={rupee(plan.price)} />
           <KeyValue label="GST (18%)" value={rupee(gst)} />
           <Divider className="my-2.5" />
           <Div className="flex-row items-center justify-between">
@@ -258,7 +258,7 @@ export function MembershipCheckoutScreen() {
             <Span className="font-display text-[22px] font-extrabold tabular-nums text-ink-900">{rupee(total)}</Span>
           </Div>
           <P className="mt-2 text-caption text-ink-400">
-            Renews on {renews}. Cancel any time before renewal from your profile.
+            Valid until {renews}. It doesn’t renew on its own: we’ll remind you before it ends.
           </P>
         </Card>
 
@@ -327,10 +327,10 @@ export function MembershipSuccessScreen() {
         </Span>
 
         <P className="relative mt-6 font-display text-[27px] font-extrabold leading-[32px] tracking-[-0.6px] text-white">
-          Your membership is active
+          Your subscription is active
         </P>
         <P className="relative mt-2.5 text-body-lg leading-[23px] text-white/65">
-          Every consultation, medicine order and test is now billed at the member rate. Nothing else to do.
+          Every consultation, medicine order and test is now billed at the subscriber price. Nothing else to do.
         </P>
 
         <Div className="relative mt-7 w-full rounded-card bg-white/10 p-4 ring-1 ring-inset  ring-white/15">
@@ -343,7 +343,7 @@ export function MembershipSuccessScreen() {
             <Span className="text-body font-semibold text-gold-300">{plan.discount}% on everything</Span>
           </Div>
           <Div className="mt-2.5 flex-row items-center justify-between">
-            <Span className="text-body text-white/60">Renews</Span>
+            <Span className="text-body text-white/60">Valid until</Span>
             <Span className="text-body font-semibold text-white">{membership.renews}</Span>
           </Div>
         </Div>
@@ -367,7 +367,7 @@ export function MembershipSuccessScreen() {
           onPress={() => nav.navigate('membership-manage')}
           className="tap mt-2 w-full py-2 text-body font-semibold text-white/60"
         >
-          View membership
+          View subscription
         </Btn>
       </StickyBar>
     </Screen>
@@ -376,7 +376,7 @@ export function MembershipSuccessScreen() {
 
 /* ========================================== 58 — Manage membership ======== */
 
-/** The member's own view: what it is saving, and when it renews. */
+/** The member's own view: what it is saving, and when it ends (nothing renews it automatically). */
 export function MembershipManageScreen() {
   const nav = useNav()
   const membership = useMembership()
@@ -384,11 +384,14 @@ export function MembershipManageScreen() {
   const pct = Math.min(100, Math.round((membership.daysLeft / (plan.months * 30)) * 100))
   const saved = totalSaved(membership.ledger)
   const byArea = savedByArea(membership.ledger)
+  /** Compared with what the member paid, GST included. */
+  const paid = planTotals(plan).total
   const [confirmingStop, setConfirmingStop] = React.useState(false)
-  const turnOffAutoRenew = () => {
-    membership.setAutoRenew(false)
-    setConfirmingStop(false)
-    showToast('Auto-renew turned off', 'success', `Your member rate continues until ${membership.renews}`)
+  // The server's `autoRenew` flag: nothing charges a renewal, so it is the renewal-reminder preference.
+  const toggleReminder = () => {
+    const on = !membership.autoRenew
+    membership.setAutoRenew(on)
+    showToast(on ? 'Renewal reminder turned on' : 'Renewal reminder turned off', 'success', `Your subscriber price continues until ${membership.renews}`)
   }
   const endNow = async () => {
     if (LIVE) {
@@ -396,7 +399,7 @@ export function MembershipManageScreen() {
         await endMembership()
       } catch (e) {
         setConfirmingStop(false)
-        showToast(errorMessage(e, 'We could not end your membership. Please try again.'), 'critical')
+        showToast(errorMessage(e, 'We could not end your subscription. Please try again.'), 'critical')
         return
       }
     } else membership.expire()
@@ -436,15 +439,15 @@ export function MembershipManageScreen() {
         </P>
         <P className="relative mt-2 text-body-sm text-white/55">
           Across {membership.ledger.length} bills —{' '}
-          {saved >= plan.price
-            ? `already ${rupee(saved - plan.price)} more than the membership cost.`
-            : `${rupee(plan.price - saved)} away from paying for itself.`}
+          {saved >= paid
+            ? `already ${rupee(saved - paid)} more than the ${rupee(paid)} you paid.`
+            : `${rupee(paid - saved)} away from paying for itself.`}
         </P>
 
         <Div className="relative mt-5">
           <Div className="flex-row items-center justify-between text-caption text-white/55">
             <Span>{membership.daysLeft} days left</Span>
-            <Span>Renews {membership.renews}</Span>
+            <Span>Valid until {membership.renews}</Span>
           </Div>
           <Div className="mt-2 h-[5px] overflow-hidden rounded-full bg-white/15">
             <Div className="h-full rounded-full bg-gold-500" style={{ width: `${pct}%` }} />
@@ -485,20 +488,24 @@ export function MembershipManageScreen() {
           </Span>
           <Div className="min-w-0 flex-1">
             <P className="text-body-lg font-semibold text-ink-900">Savings history</P>
-            <P className="mt-0.5 text-caption text-ink-400">Every bill the membership reduced</P>
+            <P className="mt-0.5 text-caption text-ink-400">Every bill the subscription reduced</P>
           </Div>
           <ChevronRight className="h-[17px] w-[17px] shrink-0 text-ink-300" />
         </Btn>
 
         <Div>
-          <SectionHeader title="Membership" className="!px-0 pb-2.5" />
+          <SectionHeader title="Subscription" className="!px-0 pb-2.5" />
           <Card elevation="tile" className="p-4">
             <KeyValue label="Plan" value={`Plus · ${plan.name}`} />
             <KeyValue label="Started" value={membership.since} />
-            <KeyValue label="Renews on" value={membership.renews} />
-            <KeyValue label="Auto-renew" value={membership.autoRenew ? 'On' : 'Off'} />
+            <KeyValue label="Valid until" value={membership.renews} />
+            <KeyValue label="Renewal reminder" value={membership.autoRenew ? 'On' : 'Off'} />
             <Divider className="my-2.5" />
-            <KeyValue label="Renewal amount" value={rupee(plan.price)} strong />
+            <KeyValue label="You paid" value={rupee(paid)} strong />
+            <P className="mt-2 text-caption text-ink-400">
+              KDC+ Plus doesn’t renew or charge you automatically.{' '}
+              {membership.autoRenew ? 'We’ll remind you to renew 7 days before it ends.' : 'Renewal reminders are off.'}
+            </P>
           </Card>
         </Div>
 
@@ -511,28 +518,33 @@ export function MembershipManageScreen() {
             Change plan
           </Btn>
           <Btn
-            onPress={() => (membership.autoRenew ? setConfirmingStop(true) : membership.setAutoRenew(true))}
+            onPress={toggleReminder}
             className="tap flex-row flex-1 items-center justify-center rounded-ctl bg-white py-3.5 text-body font-semibold text-ink-500 shadow-tile"
           >
-            {membership.autoRenew ? 'Turn off auto-renew' : 'Turn on auto-renew'}
+            {membership.autoRenew ? 'Turn off reminder' : 'Remind me to renew'}
           </Btn>
         </Div>
+        <Btn
+          onPress={() => setConfirmingStop(true)}
+          className="tap w-full py-2 text-center text-body font-semibold text-critical-700"
+        >
+          End subscription now
+        </Btn>
       </Div>
 
       {confirmingStop && (
         <Modal
           tone="caution"
           icon={<CalendarClock className="h-[26px] w-[26px]" strokeWidth={2} />}
-          title="Turn off auto-renew?"
-          body={`Your member rate continues until ${membership.renews}, then prices return to normal.`}
+          title="End KDC+ Plus now?"
+          body={`Your subscriber price stops today instead of on ${membership.renews}, and prices return to normal. There’s no refund for the days left. Your savings history stays. This can’t be undone.`}
           actions={
             <>
-              <Button onClick={turnOffAutoRenew}>Turn off auto-renew</Button>
               <Button variant="tertiary" onClick={endNow}>
-                End membership now
+                End subscription
               </Button>
               <Button variant="text" onClick={() => setConfirmingStop(false)}>
-                Keep it on
+                Keep subscription
               </Button>
             </>
           }
@@ -635,7 +647,7 @@ export function MembershipExpiredScreen() {
         </Span>
 
         <P className="mt-6 font-display text-[23px] font-extrabold leading-[29px] tracking-[-0.5px] text-ink-900">
-          Your membership has ended
+          Your subscription has ended
         </P>
         <P className="mt-2.5 text-body-lg leading-[23px] text-ink-500">
           Consultations, medicines and tests are back at the regular price. Your records and history are untouched.

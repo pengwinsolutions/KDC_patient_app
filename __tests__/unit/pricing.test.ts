@@ -29,6 +29,13 @@ describe('member price', () => {
     expect(memberPrice(327, 25)).toBe(245)
   })
 
+  it('rounds the saving, not the price, as the server bills it', () => {
+    expect(memberSaving(450, 25)).toBe(113)
+    expect(memberPrice(450, 25)).toBe(337)
+    expect(buildBill(450, 25, PLATFORM_FEE)).toEqual({ base: 450, platformFee: 49, discount: 113, total: 386 })
+    expect(memberSaving(350, 15)).toBe(53)
+  })
+
   it('leaves the amount alone at zero', () => {
     expect(memberPrice(499, 0)).toBe(499)
     expect(memberSaving(499, 0)).toBe(0)

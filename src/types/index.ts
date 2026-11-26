@@ -267,6 +267,27 @@ export interface PharmacyOrder {
   fixedStage?: number
   stageTimes?: string[]
   payment: string
+  /** Live: the server's status (`out_for_delivery`, `delivery_failed`, `returned`…). */
+  status?: string
+  /** Live: the 4-digit code to give the rider, only while out for delivery (and not locked). */
+  deliveryOtp?: string | null
+  /** Live: out for delivery, but the code was locked after too many wrong tries. */
+  deliveryCodeLocked?: boolean
+  /** Live (tracking): each time the order went out, oldest first. */
+  deliveryAttempts?: DeliveryAttempt[]
+  /** Live: why it was cancelled or returned ("Returned to store: nobody was home"). */
+  cancelReason?: string
+  /** Live: refunded on a cancel or return (0 for cash on delivery). */
+  refundAmount?: number
+}
+
+/** One trip out with a medicine order; `reason` is the server's words for a failed one. */
+export interface DeliveryAttempt {
+  attempt: number
+  outAt: string | null
+  outcome: 'out' | 'delivered' | 'failed' | string
+  reason: string | null
+  endedAt: string | null
 }
 
 /* ------------------------------------------------------------- Diagnostics */

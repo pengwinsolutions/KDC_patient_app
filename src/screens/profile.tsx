@@ -212,10 +212,10 @@ export function ProfileScreen() {
                 <Sparkles className="h-[18px] w-[18px] text-white" strokeWidth={2.4} />
               </Span>
               <Span className="min-w-0 flex-1">
-                <Span className="block text-body-lg font-bold text-white">KDC+ Plus membership</Span>
+                <Span className="block text-body-lg font-bold text-white">KDC+ Plus subscription</Span>
                 <Span className="mt-0.5 block text-caption leading-[16px] text-white/60">
                   {active
-                    ? `Renews ${membership.renews} · ${rupee(saved)} saved`
+                    ? `Valid until ${membership.renews} · ${rupee(saved)} saved`
                     : `${plan.discount}% off consultations, medicines and tests`}
                 </Span>
               </Span>

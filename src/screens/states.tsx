@@ -313,7 +313,7 @@ export function PaymentFailedScreen() {
   const retry = () => (intent ? nav.navigate('st-payment-processing', { replace: true }) : nav.navigate('payment'))
   const changeMethod = () => (intent ? nav.back() : nav.navigate('payment'))
   // Live: say what actually happened; the slot note only while the server still holds it.
-  const liveTitle = failure?.cancelled ? 'Payment cancelled' : failure?.refunded ? 'Payment refunded' : failure?.pending ? 'Waiting for your bank' : 'Payment didn’t go through'
+  const liveTitle = failure?.notServiceable ? 'We don’t deliver there yet' : failure?.cancelled ? 'Payment cancelled' : failure?.refunded ? 'Payment refunded' : failure?.pending ? 'Waiting for your bank' : 'Payment didn’t go through'
 
   // Live: while the server still holds the purchase, keep checking quietly. A UPI or bank
   // confirmation that arrives after the app stopped waiting moves straight on to success,

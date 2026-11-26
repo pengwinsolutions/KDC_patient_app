@@ -10,6 +10,7 @@ import { SCENE } from '../../mock-data/media'
 import { mergeCatalog, useCatalog } from '../../store/catalog'
 import { api, qs } from './http'
 import { atToDay, atToTime, num } from './map'
+import { rememberDelivered } from './returns'
 
 export interface ApiMedicine {
   code: string
@@ -128,15 +129,20 @@ export interface ApiPharmacyOrder {
   rider: { name: string; mobile: string } | null
   placedAt: string
   deliveredAt: string | null
-  cancellation: { reason?: string | null; at?: string | null } | null
+  cancellation: { reason?: string | null; at?: string | null; refundAmount?: number | string | null } | null
   lines: { medicineCode: string; name: string; qty: number; unitPrice: number | string }[]
   itemCount: number
   pharmacy: { name: string } | string | null
   history?: { from: string | null; to: string; at: string }[]
+  /** Only while out for delivery, only to the patient, not once locked. */
+  deliveryOtp?: string | null
+  deliveryCodeLocked?: boolean
+  /** Detail only. */
+  deliveryAttempts?: { attempt: number; outAt: string | null; outcome: string; reason: string | null; endedAt: string | null }[]
 }
 
 /** The server's statuses on the app's five tracking steps. */
-const PHARMACY_STEP: Record<string, number> = { pending_payment: 0, placed: 0, confirmed: 1, packed: 2, out_for_delivery: 3, delivered: 4 }
+const PHARMACY_STEP: Record<string, number> = { pending_payment: 0, placed: 0, confirmed: 1, packed: 2, out_for_delivery: 3, delivery_failed: 3, delivered: 4 }
 
 export const addressLine = (a: ApiAddressSnapshot | null) =>
   a ? [a.line, a.area, a.city, a.pincode].filter(Boolean).join(', ') : ''
@@ -181,7 +187,13 @@ export function toPharmacyOrder(o: ApiPharmacyOrder): PharmacyOrder {
     placedAt: Date.parse(o.placedAt),
     placed: atToDay(o.placedAt),
     eta: o.deliverySlot,
-    etaWhen: cancelled ? o.stage : delivered && o.deliveredAt ? `Delivered ${when(o.deliveredAt)}` : `Arriving ${slot}`,
+    etaWhen: cancelled
+      ? o.stage
+      : delivered && o.deliveredAt
+        ? `Delivered ${when(o.deliveredAt)}`
+        : o.status === 'delivery_failed'
+          ? 'Delivery missed · we’ll try again'
+          : `Arriving ${slot}`,
     lines: o.lines.map((l) => ({ medicineId: l.medicineCode, qty: l.qty, name: l.name, price: num(l.unitPrice) })),
     amount: num(o.bill.total),
     address: addressLine(o.address),
@@ -194,14 +206,22 @@ export function toPharmacyOrder(o: ApiPharmacyOrder): PharmacyOrder {
     cancelled,
     rxRequired: o.rxRequired,
     paymentRequired: o.paymentRequired,
+    status: o.status,
+    deliveryOtp: o.status === 'out_for_delivery' ? (o.deliveryOtp ?? null) : null,
+    deliveryCodeLocked: o.status === 'out_for_delivery' && Boolean(o.deliveryCodeLocked),
+    ...(o.deliveryAttempts ? { deliveryAttempts: o.deliveryAttempts.map((a) => ({ ...a })) } : {}),
+    ...(o.cancellation ? { cancelReason: o.cancellation.reason ?? undefined, refundAmount: num(o.cancellation.refundAmount ?? 0) } : {}),
   }
 }
 
 export async function listPharmacyOrders(): Promise<PharmacyOrder[]> {
   const page = await api.get<Page<ApiPharmacyOrder>>('patient/pharmacy/orders?scope=all&limit=50')
+  rememberDelivered(page.rows)
   return page.rows.map(toPharmacyOrder)
 }
 
 export async function loadPharmacyOrder(code: string): Promise<PharmacyOrder> {
-  return toPharmacyOrder(await api.get<ApiPharmacyOrder>(`patient/pharmacy/orders/${encodeURIComponent(code)}`))
+  const o = await api.get<ApiPharmacyOrder>(`patient/pharmacy/orders/${encodeURIComponent(code)}`)
+  rememberDelivered([o])
+  return toPharmacyOrder(o)
 }

@@ -216,7 +216,7 @@ describe('booking', () => {
     const r = await render(<SummaryScreen />)
     const text = textOf(r.root)
     expect(text).toContain('₹849')
-    expect(text).not.toContain('Member rate applied')
+    expect(text).not.toContain('Subscriber rate applied')
     expect(text).toContain('Save ₹200 on this with KDC+ Plus')
   })
 
@@ -606,11 +606,15 @@ describe('membership', () => {
     expect(textOf(after.root)).toContain('₹294') // 327 at 10% off
   })
 
-  it('turns off auto-renew and can end the membership', async () => {
+  it('turns off the renewal reminder and can end the membership', async () => {
     const r = await render(<MembershipManageScreen />)
-    await press(r.root, 'Turn off auto-renew')
-    expect(textOf(r.root)).toContain('Your member rate continues')
-    await press(r.root, 'End membership now')
+    expect(textOf(r.root)).toContain('doesn’t renew or charge you automatically')
+    await press(r.root, 'Turn off reminder')
+    expect(useMembership.getState().autoRenew).toBe(false)
+    expect(textOf(r.root)).toContain('Renewal reminders are off')
+    await press(r.root, 'End subscription now')
+    expect(textOf(r.root)).toContain('Your subscriber price stops today')
+    await press(r.root, 'End subscription')
     expect(useMembership.getState().status).toBe('expired')
     expect(nav.navigate).toHaveBeenCalledWith('st-membership-expired', { replace: true })
   })

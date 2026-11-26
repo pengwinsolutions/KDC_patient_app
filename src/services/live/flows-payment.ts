@@ -13,6 +13,7 @@ import { paidLater, payFor } from './checkout'
 import type { Hold } from './holds'
 import { buyHold } from './membership'
 import { syncOne } from './sync'
+import { isNotServiceable } from './serviceability'
 
 /** Membership: POST /patient/membership {planCode} (or the hold already waiting for that plan). */
 export async function holdMembership(intent: Extract<PaymentIntent, { kind: 'membership' }>): Promise<Hold> {
@@ -113,6 +114,7 @@ export async function runLivePayment(
       keep(null)
       return { ok: false, reason: e.message.includes('hold') || e.message.includes('expired') ? LAPSED : e.message }
     }
+    if (isNotServiceable(e)) return { ok: false, reason: e.message, notServiceable: true }
     return { ok: false, reason: e instanceof ServiceError ? e.message : 'The payment didn’t go through. Please try again.' }
   }
 }

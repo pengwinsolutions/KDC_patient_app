@@ -176,6 +176,8 @@ liveSuite('the patient app on the live backend: pharmacy, diagnostics, reports',
     expect(moved.statusLabel).toBe('Prescription verified')
     const detail = await pharmacy.loadPharmacyOrder(codOrder)
     expect(detail.stageTimes?.[1]).toBeTruthy()
+    // Wave 2 shape: the status, no delivery code before it's out for delivery, the attempts (none yet).
+    expect(detail).toMatchObject({ status: 'confirmed', deliveryOtp: null, deliveryCodeLocked: false, deliveryAttempts: [] })
   })
 
   it('a paid lab visit goes to processing, and its published report reaches Lab reports', async () => {

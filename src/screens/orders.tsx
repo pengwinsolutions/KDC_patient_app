@@ -1,4 +1,4 @@
-import { Div, P, Span } from '../components/primitives/index'
+import { Btn, Div, P, Span } from '../components/primitives/index'
 import React from 'react'
 import { Pill, FlaskConical, ChevronRight, Clock, Check } from '../components/primitives/icons'
 import { Screen, DEVICE } from '../components/ui/Screen'
@@ -12,7 +12,8 @@ import '../services/live/sync-commerce'
 import { useOrders } from '../store/orders'
 import { getLab, getMedicine, getTest } from '../store/catalog'
 import { useNow } from '../hooks/useNow'
-import { diagnosticRow, orderTestTitle, pharmacyRow, type OrderRow } from '../domain/orderTracking'
+import { diagnosticRow, orderTestTitle, paiseRupees, pharmacyRow, RETURN_STATUS_LABEL, RETURN_STATUS_TONE, type OrderRow } from '../domain/orderTracking'
+import { loadMyReturns, useAfterSales } from '../services/live/returns'
 import { LIVE } from '../services/config'
 
 /* ======================================== 34a — Orders (pharmacy + labs) == */
@@ -30,6 +31,10 @@ export function OrdersScreen() {
   const now = useNow(5000)
   const [segment, setSegment] = React.useState<'all' | 'meds' | 'tests'>('all')
   useLiveOrdersRefresh()
+  const returns = useAfterSales((s) => s.mine) ?? []
+  React.useEffect(() => {
+    if (LIVE) void loadMyReturns().catch(() => undefined)
+  }, [])
   const pharmacyRows = pharmacy.map((o) => pharmacyRow(o, (id) => getMedicine(id).name, now))
   const testRows = diagnostics.map((o) =>
     diagnosticRow(o, o.title || orderTestTitle(getTest(o.testId)), o.labName ?? getLab(o.labId).name, now),
@@ -79,6 +84,38 @@ export function OrdersScreen() {
                 <OrderCard key={o.id} order={o} onClick={() => open(o)} />
               ))}
             </Div>
+          </Div>
+        )}
+
+        {returns.length > 0 && segment !== 'tests' && (
+          <Div>
+            <P className="mb-2.5 text-caption font-bold uppercase tracking-[.08em] text-ink-400">My returns</P>
+            <Card elevation="tile" padded={false} className="overflow-hidden">
+              {returns.map((r, i) => {
+                const packs = r.lines.reduce((t, l) => t + l.qty, 0)
+                const money = r.refund ? `${paiseRupees(r.refund.amountPaise)} refunded` : r.creditNote ? `${paiseRupees(r.creditNote.totalPaise)} to refund` : null
+                return (
+                  <Btn
+                    key={r.code}
+                    onPress={() => nav.navigate('order-tracking', { params: { id: r.orderCode } })}
+                    accessibilityLabel={`Return ${r.code}`}
+                    className={`tap flex-row w-full items-center gap-3 px-4 py-3 text-left ${i ? 'border-t border-ink-100' : ''}`}
+                  >
+                    <Div className="min-w-0 flex-1">
+                      <P className="truncate text-body-sm font-semibold text-ink-900">
+                        {r.reasonLabel} · {packs} {packs === 1 ? 'pack' : 'packs'}
+                      </P>
+                      <P className="truncate text-caption tabular-nums text-ink-400">
+                        {r.orderCode}
+                        {money ? ` · ${money}` : ''}
+                      </P>
+                    </Div>
+                    <StatusBadge tone={RETURN_STATUS_TONE[r.status]}>{RETURN_STATUS_LABEL[r.status]}</StatusBadge>
+                    <ChevronRight className="h-[16px] w-[16px] shrink-0 text-ink-300" />
+                  </Btn>
+                )
+              })}
+            </Card>
           </Div>
         )}
 

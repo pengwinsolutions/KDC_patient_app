@@ -63,6 +63,7 @@ import { collectionWindow, diagnosticSlots, formatShort, istParts, MOCK_TODAY, M
 import { LIVE } from '../services/config'
 import { errorMessage } from '../services/errors'
 import { loadLabBooking, loadLabSlots, slotGroups } from '../services/live/diagnostics'
+import { api } from '../services/live/http'
 import { loadReport, useReportDetails } from '../services/live/reports'
 import { syncOne } from '../services/live/sync'
 import '../services/live/sync-commerce'
@@ -71,6 +72,7 @@ import { labTestPrice } from '../domain/pricing'
 import { NoResultsBody } from './states'
 import { plural } from '../domain/plural'
 
+/** Demo-mode caption for the step in progress (live builds show the server's statusLabel). */
 const STAGE_CAPTION = ['Booking confirmed', 'Technician assigned', 'Awaiting collection', 'Processing at lab', 'Report ready']
 
 /** Opens a test's page, and starts a booking for it, from any list. */
@@ -830,6 +832,24 @@ export function DiagnosticTrackingScreen() {
   const needsFastingReminder = !cancelled && !finished && (test.fasting !== 'Not required' || (!LIVE && b.fixedStage !== undefined))
   const paidOnline = !LIVE || b.paymentType === 'online'
   const canCancel = LIVE ? Boolean(b.canCancel) : !cancelled && !finished
+  // Live: what cancelling refunds comes from the server (cash collected at the door included), not from the payment type.
+  const [refund, setRefund] = React.useState<number | null>(null)
+  React.useEffect(() => {
+    if (!LIVE || !confirming || !code) return
+    let live = true
+    api
+      .get<{ cancelRefund?: number | string | null; paymentStatus?: string; bill?: { total: number | string } }>(`patient/diagnostics/bookings/${encodeURIComponent(code)}`)
+      .then((v) => {
+        if (!live) return
+        const quoted = v.cancelRefund ?? (v.paymentStatus === 'paid' || v.paymentStatus === 'partially_refunded' ? v.bill?.total : 0)
+        setRefund(Number(quoted ?? 0) || 0)
+      })
+      .catch(() => live && setRefund(null))
+    return () => {
+      live = false
+    }
+  }, [confirming, code])
+  const refundText = (amount: number) => (b.paymentType === 'cash' ? `${rupee(amount)} you paid in cash will be refunded. Our team will contact you to return it.` : `${rupee(amount)} will be refunded to the original payment method within 3–5 working days.`)
   const reportCode = b.reportCodes?.[0]
   const cancelBooking = async () => {
     try {
@@ -841,7 +861,7 @@ export function DiagnosticTrackingScreen() {
     }
     if (LIVE) void syncOne('payments').catch(() => undefined)
     else usePayments.getState().markRefunded(b.id)
-    showToast('Booking cancelled', 'success', paidOnline ? 'Your refund is on its way' : undefined)
+    showToast('Booking cancelled', 'success', (LIVE ? (refund ?? 0) > 0 : paidOnline) ? 'Your refund is on its way' : undefined)
     nav.navigate('orders-home', { tab: 'orders' })
   }
   const steps: TimelineStep[] = [
@@ -909,7 +929,7 @@ export function DiagnosticTrackingScreen() {
               <Span key={i} className={`h-[4px] flex-1 rounded-full ${i <= stage + 1 ? 'bg-white/90' : 'bg-white/25'}`} />
             ))}
           </Div>
-          <P className="mt-2 text-caption text-white/60">Step {stage + 1} of 5 · {STAGE_CAPTION[stage]}</P>
+          <P className="mt-2 text-caption text-white/60">Step {stage + 1} of 5 · {LIVE && b.statusLabel ? b.statusLabel : STAGE_CAPTION[stage]}</P>
         </Div>
 
         {needsFastingReminder && (
@@ -952,7 +972,7 @@ export function DiagnosticTrackingScreen() {
           title="Cancel this collection?"
           body={
             LIVE
-              ? `${tech ? `${tech} is assigned for ${b.date}. ` : ''}${paidOnline ? `${rupee(b.amount)} will be refunded to the original payment method within 3–5 working days.` : 'Nothing has been charged.'}`
+              ? `${tech ? `${tech} is assigned for ${b.date}. ` : ''}${refund === null ? 'Checking what will be refunded…' : refund > 0 ? refundText(refund) : 'Nothing has been charged.'}`
               : `${b.technician.name} is already assigned for ${b.date}. ${rupee(b.amount)} will be refunded to the original payment method within 3–5 working days.`
           }
           actions={

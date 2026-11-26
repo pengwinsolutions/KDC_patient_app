@@ -1,4 +1,4 @@
-import { currentStage, diagnosticRow, orderTestTitle, pharmacyRow, STAGE_INTERVAL_MS, stageState } from '../../src/domain/orderTracking'
+import { currentStage, diagnosticRow, lastFailedAttempt, orderTestTitle, PHARMACY_STATUS_LABEL, pharmacyRow, returnReason, STAGE_INTERVAL_MS, stageState } from '../../src/domain/orderTracking'
 import { diagnosticOrders, pharmacyOrders } from '../../src/mock-data/mock'
 import type { PharmacyOrder } from '../../src/types'
 
@@ -54,5 +54,76 @@ describe('order rows', () => {
   it('prefers the full test name only when it is short', () => {
     expect(orderTestTitle({ name: 'Lipid Profile — Complete', short: 'Lipid Profile' })).toBe('Lipid Profile — Complete')
     expect(orderTestTitle({ name: 'HbA1c (Glycosylated Haemoglobin)', short: 'HbA1c' })).toBe('HbA1c')
+  })
+})
+
+describe('Wave 2 delivery statuses', () => {
+  const name = (id: string) => id
+  const base: PharmacyOrder = { ...pharmacyOrders[0] }
+
+  it('labels the new statuses for patients', () => {
+    expect(PHARMACY_STATUS_LABEL.delivery_failed).toBe('Delivery attempt failed')
+    expect(PHARMACY_STATUS_LABEL.returned).toBe('Returned to pharmacy')
+    expect(PHARMACY_STATUS_LABEL.out_for_delivery).toBe('Out for delivery')
+  })
+
+  it('a failed delivery is still in progress, in caution', () => {
+    const row = pharmacyRow({ ...base, status: 'delivery_failed', fixedStage: 3, statusLabel: 'Delivery attempt failed' }, name, 0)
+    expect(row).toMatchObject({ status: 'Delivery attempt failed', tone: 'caution', live: true })
+  })
+
+  it('a returned order is finished, with its refund', () => {
+    const row = pharmacyRow({ ...base, status: 'returned', cancelled: true, statusLabel: 'Returned to pharmacy', refundAmount: 263 }, name, 0)
+    expect(row).toMatchObject({ status: 'Returned to pharmacy', tone: 'critical', live: false, when: 'Returned · ₹263 refund on its way' })
+    expect(pharmacyRow({ ...base, status: 'returned', cancelled: true, refundAmount: 0 }, name, 0)).toMatchObject({ when: base.placed })
+  })
+
+  it('out for delivery shows the delivery code on the row', () => {
+    expect(pharmacyRow({ ...base, status: 'out_for_delivery', deliveryOtp: '4821' }, name, 0).when).toBe('On the way · delivery code 4821')
+    expect(pharmacyRow({ ...base, status: 'out_for_delivery', deliveryOtp: null }, name, 0).when).toBe(base.etaWhen)
+  })
+
+  it('a cancelled order is unchanged', () => {
+    expect(pharmacyRow({ ...base, status: 'cancelled', cancelled: true, statusLabel: 'Cancelled' }, name, 0)).toMatchObject({ status: 'Cancelled', tone: 'neutral', live: false })
+  })
+
+  it('finds the latest failed attempt and the return reason', () => {
+    const a = (attempt: number, outcome: string, reason: string | null = null) => ({ attempt, outcome, reason, outAt: null, endedAt: null })
+    expect(lastFailedAttempt([a(1, 'failed', 'nobody was home'), a(2, 'failed', 'refused'), a(3, 'out')])?.reason).toBe('refused')
+    expect(lastFailedAttempt([a(1, 'delivered')])).toBeNull()
+    expect(lastFailedAttempt(undefined)).toBeNull()
+    expect(returnReason('Returned to store: nobody was home (gate locked)')).toBe('nobody was home (gate locked)')
+    expect(returnReason(undefined)).toBeNull()
+  })
+})
+
+describe('live order mapping (toPharmacyOrder)', () => {
+  const { toPharmacyOrder } = require('../../src/services/live/pharmacy') as typeof import('../../src/services/live/pharmacy')
+  const api = {
+    code: 'KDC-PH-1', status: 'placed', stage: 'Order confirmed', bill: { subtotal: 245, memberSaving: 0, deliveryFee: 0, total: 245 },
+    paymentMethod: 'cod' as const, paymentStatus: 'pending', paidVia: null, paymentRequired: false, deliverySlot: '26 Nov, 9 AM–12 PM',
+    address: { line: '1 Road', area: 'Banjara Hills' }, rxRequired: false, rxVerified: false, rider: null, placedAt: '2026-11-25T08:00:00.000Z',
+    deliveredAt: null, cancellation: null, lines: [{ medicineCode: 'MED-1', name: 'Dolo 650', qty: 1, unitPrice: 245 }], itemCount: 1, pharmacy: { name: 'Apollo' },
+  }
+
+  it('keeps older orders as they were', () => {
+    const o = toPharmacyOrder(api)
+    expect(o).toMatchObject({ status: 'placed', fixedStage: 0, deliveryOtp: null, deliveryCodeLocked: false, cancelled: false })
+    expect(o.deliveryAttempts).toBeUndefined()
+  })
+
+  it('maps the delivery code, rider and attempts while out for delivery', () => {
+    const o = toPharmacyOrder({ ...api, status: 'out_for_delivery', stage: 'Out for delivery', rider: { name: 'Ravi', mobile: '9000022001' }, deliveryOtp: '4821', deliveryCodeLocked: false, deliveryAttempts: [{ attempt: 1, outAt: '2026-11-25T10:00:00.000Z', outcome: 'out', reason: null, endedAt: null }] })
+    expect(o).toMatchObject({ fixedStage: 3, deliveryOtp: '4821', rider: { name: 'Ravi', mobile: '9000022001' }, deliveryAttempts: [{ attempt: 1, outcome: 'out' }] })
+  })
+
+  it('a failed delivery stays on the delivery step and never carries a code', () => {
+    const o = toPharmacyOrder({ ...api, status: 'delivery_failed', stage: 'Delivery attempt failed', deliveryOtp: '9999' })
+    expect(o).toMatchObject({ fixedStage: 3, statusLabel: 'Delivery attempt failed', deliveryOtp: null, cancelled: false, etaWhen: 'Delivery missed · we’ll try again' })
+  })
+
+  it('a returned order is closed with its reason and refund', () => {
+    const o = toPharmacyOrder({ ...api, status: 'returned', stage: 'Returned to pharmacy', paymentMethod: 'online', cancellation: { reason: 'Returned to store: nobody was home', at: '2026-11-25T12:00:00.000Z', refundAmount: '245.00' } })
+    expect(o).toMatchObject({ cancelled: true, statusLabel: 'Returned to pharmacy', cancelReason: 'Returned to store: nobody was home', refundAmount: 245, etaWhen: 'Returned to pharmacy' })
   })
 })

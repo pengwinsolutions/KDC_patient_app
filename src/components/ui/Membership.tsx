@@ -93,7 +93,7 @@ export function SavedStrip({ amount, area }: { amount: number; area: BenefitArea
     <Div className="flex-row items-center gap-2.5 rounded-tile bg-vital-50 px-3.5 py-3">
       <Sparkles className="h-[15px] w-[15px] shrink-0 text-vital-600" strokeWidth={2.4} />
       <P className="text-body-sm font-semibold text-vital-700">
-        Your membership saved {rupee(saved)} on this order
+        Your subscription saved {rupee(saved)} on this order
       </P>
     </Div>
   )

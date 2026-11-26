@@ -29,7 +29,7 @@ export const SECTIONS: Section[] = [
   { id: 'pharmacy', title: 'Pharmacy', blurb: 'Medicine discovery, prescription upload, cart and delivery.' },
   { id: 'diagnostics', title: 'Diagnostics', blurb: 'Tests, labs, home collection, tracking and reports.' },
   { id: 'records', title: 'Medical Records & Family', blurb: 'The connected health record and family profiles.' },
-  { id: 'membership', title: 'KDC+ Plus Membership', blurb: 'The paid tier: one rate off consultations, pharmacy and diagnostics.' },
+  { id: 'membership', title: 'KDC+ Plus Subscription', blurb: 'The paid tier: one rate off consultations, pharmacy and diagnostics.' },
   { id: 'profile', title: 'Profile & Settings', blurb: 'Account, medical information, addresses, payments and support.' },
   { id: 'states', title: 'UI States', blurb: 'Loading, empty, error and clinical exception states.' },
 ]
@@ -107,10 +107,10 @@ export const SCREENS: ScreenDef[] = [
 
   /* ------------------------------------------------------ Membership */
   { id: 'membership', code: '55', title: 'KDC+ Plus', section: 'membership', Component: Mem.MembershipScreen, statusTone: 'light', note: 'The offer — one percentage off everything KDC+ bills for.' },
-  { id: 'membership-checkout', code: '56', title: 'Confirm Membership', section: 'membership', Component: Mem.MembershipCheckoutScreen, note: 'Plan, tax and the promise that the rate applies immediately.' },
-  { id: 'membership-success', code: '57', title: 'Membership Active', section: 'membership', Component: Mem.MembershipSuccessScreen, statusTone: 'light', indicatorTone: 'light', note: 'Confirmation that prices have already changed.' },
-  { id: 'membership-manage', code: '58', title: 'Manage Membership', section: 'membership', Component: Mem.MembershipManageScreen, statusTone: 'light', note: 'What it has saved, and when it renews.' },
-  { id: 'membership-savings', code: '59', title: 'Savings History', section: 'membership', Component: Mem.MembershipSavingsScreen, statusTone: 'light', note: 'Every bill the membership reduced, with the arithmetic shown.' },
+  { id: 'membership-checkout', code: '56', title: 'Confirm Subscription', section: 'membership', Component: Mem.MembershipCheckoutScreen, note: 'Plan, tax and the promise that the rate applies immediately.' },
+  { id: 'membership-success', code: '57', title: 'Subscription Active', section: 'membership', Component: Mem.MembershipSuccessScreen, statusTone: 'light', indicatorTone: 'light', note: 'Confirmation that prices have already changed.' },
+  { id: 'membership-manage', code: '58', title: 'Manage Subscription', section: 'membership', Component: Mem.MembershipManageScreen, statusTone: 'light', note: 'What it has saved, and when it renews.' },
+  { id: 'membership-savings', code: '59', title: 'Savings History', section: 'membership', Component: Mem.MembershipSavingsScreen, statusTone: 'light', note: 'Every bill the subscription reduced, with the arithmetic shown.' },
 
   /* --------------------------------------------------------- Profile */
   { id: 'notifications', code: '48', title: 'Notifications', section: 'profile', Component: Prof.NotificationsScreen, note: 'Grouped by recency, filterable by care category.' },
@@ -141,7 +141,7 @@ export const SCREENS: ScreenDef[] = [
   { id: 'st-report-pending', code: 'S16', title: 'Lab Report Pending', section: 'states', Component: States.ReportPendingScreen },
   { id: 'st-order-delayed', code: 'S17', title: 'Order Delayed', section: 'states', Component: States.OrderDelayedScreen },
   { id: 'st-no-results', code: 'S18', title: 'No Search Results', section: 'states', Component: States.NoResultsScreen },
-  { id: 'st-membership-expired', code: 'S19', title: 'Membership Expired', section: 'states', Component: Mem.MembershipExpiredScreen, note: 'Prices revert; the record of what was saved does not.' },
+  { id: 'st-membership-expired', code: 'S19', title: 'Subscription Expired', section: 'states', Component: Mem.MembershipExpiredScreen, note: 'Prices revert; the record of what was saved does not.' },
 ]
 
 export const screenById = (id: string) => SCREENS.find((s) => s.id === id)
@@ -181,8 +181,8 @@ export const FLOWS: Flow[] = [
   },
   {
     id: 'membership',
-    title: 'Membership journey',
-    blurb: 'Taking the plan, then watching the member rate apply across all three services.',
+    title: 'Subscription journey',
+    blurb: 'Taking the plan, then watching the subscriber rate apply across all three services.',
     steps: [
       'home', 'membership', 'membership-checkout', 'membership-success', 'membership-manage',
       'membership-savings', 'doctor-profile', 'summary', 'payment', 'medicine-detail', 'cart',

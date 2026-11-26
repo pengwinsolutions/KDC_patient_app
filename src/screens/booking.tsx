@@ -636,7 +636,7 @@ export function SummaryScreen() {
             <Tag className="h-[17px] w-[17px] shrink-0 text-vital-600" strokeWidth={2.2} />
             <Div className="min-w-0 flex-1 text-left">
               <Div className="flex-row items-center gap-2">
-                <P className="text-body-sm font-bold text-ink-900">Member rate applied</P>
+                <P className="text-body-sm font-bold text-ink-900">Subscriber rate applied</P>
                 <PlusTag size="xs" />
               </Div>
               <P className="text-caption text-vital-700">You saved {rupee(discount)} on this booking</P>

@@ -71,7 +71,7 @@ export const useCheckout = create<CheckoutState>((set) => ({
 
 export type PaymentOutcome =
   | { ok: true; screen: string; params?: Record<string, unknown> }
-  | { ok: false; reason: string; cancelled?: boolean; pending?: boolean; refunded?: boolean }
+  | { ok: false; reason: string; cancelled?: boolean; pending?: boolean; refunded?: boolean; /** The delivery pincode isn't served: nothing was charged; pick another address. */ notServiceable?: boolean }
 
 const today = () => formatShortYear(MOCK_TODAY).replace(/^\w+, /, '')
 
@@ -165,7 +165,7 @@ async function fulfil(intent: PaymentIntent, method: PaymentMethod): Promise<Ext
     case 'membership':
       await useMembership.getState().activate(intent.planId)
       recordPayment({ type: 'Membership', title: `KDC+ Plus · ${intent.planName}`, amount: intent.amount, ref: intent.planId }, method)
-      notify().push({ category: 'Payments', title: 'KDC+ Plus is active', body: `Your ${intent.planName} membership has started`, time: 'Just now' })
+      notify().push({ category: 'Payments', title: 'KDC+ Plus is active', body: `Your ${intent.planName} subscription has started`, time: 'Just now' })
       return { ok: true, screen: 'membership-success' }
   }
 }

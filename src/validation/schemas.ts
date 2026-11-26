@@ -9,9 +9,12 @@ const stripCountry = (s: string) => {
   return d.length === 12 && d.startsWith('91') ? d.slice(2) : d
 }
 
-const requiredMobile = z.string().refine((s) => stripCountry(s).length === 10, 'Enter a 10-digit mobile number')
+/** The server's rule: 10 digits starting 6–9 (Indian mobile numbers). */
+const isMobile = (s: string) => /^[6-9]\d{9}$/.test(stripCountry(s))
 
-const optionalMobile = z.string().refine((s) => !s.trim() || stripCountry(s).length === 10, 'Enter a 10-digit mobile number')
+const requiredMobile = z.string().refine(isMobile, 'Enter a 10-digit mobile number')
+
+const optionalMobile = z.string().refine((s) => !s.trim() || isMobile(s), 'Enter a 10-digit mobile number')
 
 const personName = z
   .string()
@@ -63,7 +66,7 @@ export const addressSchema = z.object({
   label: z.enum(['Home', 'Office', 'Other']),
   line: z.string().trim().min(5, 'Enter the flat, building and street'),
   area: z.string().trim().min(3, 'Enter the area and city'),
-  pincode: z.string().regex(/^\d{6}$/, 'Enter a 6-digit PIN code'),
+  pincode: z.string().regex(/^[1-9]\d{5}$/, 'Enter a 6-digit PIN code'),
   phone: requiredMobile,
 })
 export type AddressForm = z.infer<typeof addressSchema>
@@ -93,7 +96,7 @@ export type CardForm = z.infer<typeof cardSchema>
 /**
  * Medical information. A new record starts empty, so every part is optional; what is entered
  * must be valid by the server's own limits (src/domain/medical), and an emergency contact needs
- * a name and a mobile number together.
+ * a name, a relationship and a mobile number together (the server requires all three).
  */
 export const medicalSchema = z
   .object({
@@ -112,4 +115,6 @@ export const medicalSchema = z
   })
   .refine((f) => !f.emergencyName.trim() || f.emergencyMobile.trim(), { path: ['emergencyMobile'], message: 'Enter the contact’s mobile number' })
   .refine((f) => !f.emergencyMobile.trim() || f.emergencyName.trim(), { path: ['emergencyName'], message: 'Enter the contact’s name' })
+  // Shown under the name: the relationship chips have no error line of their own.
+  .refine((f) => !f.emergencyName.trim() || f.emergencyRelation.trim().length >= 2, { path: ['emergencyName'], message: 'Choose how this contact is related to you' })
 export type MedicalForm = z.infer<typeof medicalSchema>

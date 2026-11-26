@@ -16,6 +16,7 @@ import { type ApiLabBooking, toDiagnosticOrder } from './diagnostics'
 import type { Hold } from './holds'
 import { api } from './http'
 import { type ApiPharmacyOrder, toPharmacyOrder } from './pharmacy'
+import { isNotServiceable, markNotServiceable, pincodeOf } from './serviceability'
 
 /** The address the patient picked, as the server's id. */
 function selectedAddressId(): number {
@@ -39,13 +40,23 @@ function cartPrescriptions(): { prescriptionCodes?: string[]; prescriptionFileId
 }
 
 export async function holdPharmacy(intent: Extract<PaymentIntent, { kind: 'pharmacy' }>, online: boolean): Promise<Hold> {
-  const order = await api.post<ApiPharmacyOrder>('patient/pharmacy/orders', {
-    lines: intent.lines.map((l) => ({ medicineCode: l.medicineId, qty: l.qty })),
-    addressId: selectedAddressId(),
-    slot: intent.slot,
-    paymentMethod: online ? 'online' : 'cod',
-    ...cartPrescriptions(),
-  })
+  const addressId = selectedAddressId()
+  const order = await api
+    .post<ApiPharmacyOrder>('patient/pharmacy/orders', {
+      lines: intent.lines.map((l) => ({ medicineCode: l.medicineId, qty: l.qty })),
+      addressId,
+      slot: intent.slot,
+      paymentMethod: online ? 'online' : 'cod',
+      ...cartPrescriptions(),
+    })
+    .catch((e: unknown) => {
+      // 422 pincode_not_serviceable: nothing was held and the cart stays; checkout marks this address.
+      if (isNotServiceable(e)) {
+        const { items } = useAddresses.getState()
+        markNotServiceable(pincodeOf(items.find((a) => Number(a.id) === addressId)), e.message)
+      }
+      throw e
+    })
   const mapped = toPharmacyOrder(order)
   useOrders.getState().upsertPharmacy(mapped)
   return {

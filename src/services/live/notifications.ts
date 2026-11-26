@@ -25,7 +25,7 @@ const ACTIONS: Record<string, string> = {
   lab_booking: 'Track booking',
   order: 'Track order',
   payment: 'View payments',
-  membership: 'View membership',
+  membership: 'View subscription',
   support_ticket: 'Read the reply',
   waiting_room: 'Join now',
 }
